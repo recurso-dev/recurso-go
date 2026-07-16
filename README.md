@@ -4,7 +4,7 @@ Official Go SDK for the [Recurso](https://github.com/recurso-dev/recurso) billin
 
 Standard library only — no third-party dependencies. Requires Go 1.22+.
 
-The client is hand-crafted but generated-in-spirit from the OpenAPI 3.1 description in [`cmd/api/openapi.yaml`](../../cmd/api/openapi.yaml): types and paths mirror the spec exactly, and monetary amounts are `int64` values in the currency's smallest unit (cents/paise).
+The client is hand-crafted but generated-in-spirit from the OpenAPI 3.1 description in [`cmd/api/openapi.yaml`](https://github.com/recurso-dev/recurso/blob/main/cmd/api/openapi.yaml): types and paths mirror the spec exactly, and monetary amounts are `int64` values in the currency's smallest unit (cents/paise).
 
 ## Install
 
