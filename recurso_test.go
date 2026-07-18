@@ -531,3 +531,88 @@ func TestErrorNonJSON(t *testing.T) {
 		t.Errorf("apiErr = %+v", apiErr)
 	}
 }
+
+// --- Usage-based billing v1 (metering) ---
+
+func TestBillableMetricsCreate(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"data":{"id":"bm_1","name":"API calls","code":"api_calls","aggregation_type":"sum"}}`)
+	m, err := ts.client.BillableMetrics.Create(context.Background(), &BillableMetricParams{Name: "API calls", Code: "api_calls", AggregationType: "sum"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/billable-metrics")
+	if m.ID != "bm_1" || m.Code != "api_calls" || m.AggregationType != "sum" {
+		t.Errorf("m = %+v", m)
+	}
+}
+
+func TestBillableMetricsList(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"bm_1","code":"api_calls"},{"id":"bm_2","code":"active_users"}]}`)
+	list, err := ts.client.BillableMetrics.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/billable-metrics")
+	if len(list) != 2 || list[1].Code != "active_users" {
+		t.Errorf("list = %+v", list)
+	}
+}
+
+func TestBillableMetricsGetUpdateDelete(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"bm_1","code":"api_calls","aggregation_type":"max"}}`)
+	if _, err := ts.client.BillableMetrics.Get(context.Background(), "bm_1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/billable-metrics/bm_1")
+
+	if _, err := ts.client.BillableMetrics.Update(context.Background(), "bm_1", &BillableMetricParams{Name: "API calls", Code: "api_calls", AggregationType: "max"}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	ts.assertRequest(http.MethodPut, "/billable-metrics/bm_1")
+
+	if err := ts.client.BillableMetrics.Delete(context.Background(), "bm_1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	ts.assertRequest(http.MethodDelete, "/billable-metrics/bm_1")
+}
+
+func TestPlansSetCharges(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"chg_1","plan_id":"plan_1","metric_id":"bm_1","charge_model":"per_unit","amounts":{"INR":{"unit_amount":"0.0035"}}}]}`)
+	up := int64(1000)
+	charges, err := ts.client.Plans.SetCharges(context.Background(), "plan_1", []ChargeParams{
+		{MetricID: "bm_1", ChargeModel: "graduated", Amounts: map[string]ChargeAmounts{
+			"INR": {Tiers: []ChargeTier{{UpTo: &up, UnitAmount: "0.10"}, {UpTo: nil, UnitAmount: "0.05"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SetCharges: %v", err)
+	}
+	ts.assertRequest(http.MethodPut, "/plans/plan_1/charges")
+	if len(charges) != 1 || charges[0].ChargeModel != "per_unit" || charges[0].Amounts["INR"].UnitAmount != "0.0035" {
+		t.Errorf("charges = %+v", charges)
+	}
+}
+
+func TestPlansGetCharges(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"chg_1","metric":{"code":"api_calls","aggregation_type":"sum"}}]}`)
+	charges, err := ts.client.Plans.GetCharges(context.Background(), "plan_1")
+	if err != nil {
+		t.Fatalf("GetCharges: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/plans/plan_1/charges")
+	if len(charges) != 1 || charges[0].Metric == nil || charges[0].Metric.Code != "api_calls" {
+		t.Errorf("charges = %+v", charges)
+	}
+}
+
+func TestSubscriptionsUsageAmount(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"subscription_id":"sub_1","currency":"INR","charges":[{"metric_code":"api_calls","quantity":45231,"amount":176155}],"total_amount":176155}}`)
+	ua, err := ts.client.Subscriptions.UsageAmount(context.Background(), "sub_1")
+	if err != nil {
+		t.Fatalf("UsageAmount: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/subscriptions/sub_1/usage-amount")
+	if ua.TotalAmount != 176155 || len(ua.Charges) != 1 || ua.Charges[0].Quantity != 45231 {
+		t.Errorf("ua = %+v", ua)
+	}
+}

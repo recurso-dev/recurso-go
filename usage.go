@@ -21,12 +21,15 @@ type UsageDimension struct {
 	LastSeen   time.Time `json:"last_seen"`
 }
 
-// UsageRecordParams reports a metered usage event.
+// UsageRecordParams reports a metered usage event. Properties are optional
+// free-form attributes (max 20; keys ≤100 chars, values ≤255) — the
+// "unique" billable-metric aggregation counts distinct values of one.
 type UsageRecordParams struct {
-	SubscriptionID string `json:"subscription_id"`
-	CustomerID     string `json:"customer_id"`
-	Dimension      string `json:"dimension"`
-	Quantity       int64  `json:"quantity"`
+	SubscriptionID string            `json:"subscription_id"`
+	CustomerID     string            `json:"customer_id"`
+	Dimension      string            `json:"dimension"`
+	Quantity       int64             `json:"quantity"`
+	Properties     map[string]string `json:"properties,omitempty"`
 }
 
 // UsageRecordResult is returned by Record.

@@ -1,6 +1,6 @@
 # recurso-go
 
-Official Go SDK for the [Recurso](https://github.com/recurso-dev/recurso) billing API — 18 resources / 68 methods covering plans, customers, the full subscription lifecycle (pause/resume/cancel, add-ons, plan-change preview), invoices, usage, coupons, quotes, entitlements, webhooks (deliveries and redelivery), events, credit notes, gifts, referrals, mandates, ledger, analytics, developer keys, and the tenant account.
+Official Go SDK for the [Recurso](https://github.com/recurso-dev/recurso) billing API — 19 resources / 76 methods covering plans, customers, the full subscription lifecycle (pause/resume/cancel, add-ons, plan-change preview), invoices, usage-based billing (billable metrics, plan charges, live usage-amount preview), coupons, quotes, entitlements, webhooks (deliveries and redelivery), events, credit notes, gifts, referrals, mandates, ledger, analytics, developer keys, and the tenant account.
 
 Standard library only — no third-party dependencies. Requires Go 1.22+.
 

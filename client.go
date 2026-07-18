@@ -23,24 +23,25 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 
-	Account       *AccountService
-	Analytics     *AnalyticsService
-	Coupons       *CouponsService
-	CreditNotes   *CreditNotesService
-	Customers     *CustomersService
-	Developer     *DeveloperService
-	Entitlements  *EntitlementsService
-	Events        *EventsService
-	Gifts         *GiftsService
-	Invoices      *InvoicesService
-	Ledger        *LedgerService
-	Mandates      *MandatesService
-	Plans         *PlansService
-	Quotes        *QuotesService
-	Referrals     *ReferralsService
-	Subscriptions *SubscriptionsService
-	Usage         *UsageService
-	Webhooks      *WebhooksService
+	Account         *AccountService
+	Analytics       *AnalyticsService
+	BillableMetrics *BillableMetricsService
+	Coupons         *CouponsService
+	CreditNotes     *CreditNotesService
+	Customers       *CustomersService
+	Developer       *DeveloperService
+	Entitlements    *EntitlementsService
+	Events          *EventsService
+	Gifts           *GiftsService
+	Invoices        *InvoicesService
+	Ledger          *LedgerService
+	Mandates        *MandatesService
+	Plans           *PlansService
+	Quotes          *QuotesService
+	Referrals       *ReferralsService
+	Subscriptions   *SubscriptionsService
+	Usage           *UsageService
+	Webhooks        *WebhooksService
 }
 
 // Option configures a Client. Pass options to NewClient.
@@ -79,6 +80,7 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.Account = &AccountService{client: c}
 	c.Analytics = &AnalyticsService{client: c}
 	c.Coupons = &CouponsService{client: c}
+	c.BillableMetrics = &BillableMetricsService{client: c}
 	c.CreditNotes = &CreditNotesService{client: c}
 	c.Customers = &CustomersService{client: c}
 	c.Developer = &DeveloperService{client: c}
