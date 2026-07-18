@@ -30,6 +30,10 @@ type UsageRecordParams struct {
 	Dimension      string            `json:"dimension"`
 	Quantity       int64             `json:"quantity"`
 	Properties     map[string]string `json:"properties,omitempty"`
+	// TransactionID is the caller's idempotency key (≤255 chars): a retried
+	// event with the same (subscription, transaction_id) collapses to the
+	// original.
+	TransactionID string `json:"transaction_id,omitempty"`
 }
 
 // UsageRecordResult is returned by Record.

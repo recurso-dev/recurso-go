@@ -25,6 +25,7 @@ type Client struct {
 
 	Account         *AccountService
 	Analytics       *AnalyticsService
+	AuditLogs       *AuditLogsService
 	BillableMetrics *BillableMetricsService
 	Coupons         *CouponsService
 	CreditNotes     *CreditNotesService
@@ -41,6 +42,8 @@ type Client struct {
 	Referrals       *ReferralsService
 	Subscriptions   *SubscriptionsService
 	Usage           *UsageService
+	UsageAlerts     *UsageAlertsService
+	Wallets         *WalletsService
 	Webhooks        *WebhooksService
 }
 
@@ -80,6 +83,7 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.Account = &AccountService{client: c}
 	c.Analytics = &AnalyticsService{client: c}
 	c.Coupons = &CouponsService{client: c}
+	c.AuditLogs = &AuditLogsService{client: c}
 	c.BillableMetrics = &BillableMetricsService{client: c}
 	c.CreditNotes = &CreditNotesService{client: c}
 	c.Customers = &CustomersService{client: c}
@@ -95,6 +99,8 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.Referrals = &ReferralsService{client: c}
 	c.Subscriptions = &SubscriptionsService{client: c}
 	c.Usage = &UsageService{client: c}
+	c.UsageAlerts = &UsageAlertsService{client: c}
+	c.Wallets = &WalletsService{client: c}
 	c.Webhooks = &WebhooksService{client: c}
 	return c
 }

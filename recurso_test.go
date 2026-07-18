@@ -616,3 +616,121 @@ func TestSubscriptionsUsageAmount(t *testing.T) {
 		t.Errorf("ua = %+v", ua)
 	}
 }
+
+// --- Wallets, commitments, alerts, batch, audit (Lago-parity B/C) ---
+
+func TestWalletsCreateAndTopUp(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"data":{"id":"wal_1","customer_id":"cus_1","currency":"INR","balance":0}}`)
+	w, err := ts.client.Wallets.Create(context.Background(), &WalletCreateParams{CustomerID: "cus_1", Currency: "INR"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/wallets")
+	if w.ID != "wal_1" || w.Currency != "INR" {
+		t.Errorf("w = %+v", w)
+	}
+
+	ts2 := newTestServer(t, http.StatusCreated, `{"data":{"id":"wtx_1","wallet_id":"wal_1","type":"top_up","amount":500000,"balance_after":500000}}`)
+	wtx, err := ts2.client.Wallets.TopUp(context.Background(), "wal_1", &WalletTopUpParams{Amount: 500000, Source: "manual"})
+	if err != nil {
+		t.Fatalf("TopUp: %v", err)
+	}
+	ts2.assertRequest(http.MethodPost, "/wallets/wal_1/top-up")
+	if wtx.BalanceAfter != 500000 || wtx.Type != "top_up" {
+		t.Errorf("wtx = %+v", wtx)
+	}
+}
+
+func TestWalletsReadsAndAutoRecharge(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"wal_1","currency":"INR","balance":100}]}`)
+	list, err := ts.client.Wallets.ForCustomer(context.Background(), "cus_1")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ForCustomer: %v / %+v", err, list)
+	}
+	ts.assertRequest(http.MethodGet, "/customers/cus_1/wallets")
+
+	ts2 := newTestServer(t, http.StatusOK, `{"data":[{"id":"wtx_1","type":"drain","amount":100,"balance_after":0}]}`)
+	txs, err := ts2.client.Wallets.Transactions(context.Background(), "wal_1")
+	if err != nil || len(txs) != 1 || txs[0].Type != "drain" {
+		t.Fatalf("Transactions: %v / %+v", err, txs)
+	}
+	ts2.assertRequest(http.MethodGet, "/wallets/wal_1/transactions")
+
+	ts3 := newTestServer(t, http.StatusOK, `{"data":{"id":"wal_1","auto_recharge_threshold":100000,"auto_recharge_amount":500000}}`)
+	th, amt := int64(100000), int64(500000)
+	w, err := ts3.client.Wallets.SetAutoRecharge(context.Background(), "wal_1", &WalletAutoRechargeParams{AutoRechargeThreshold: &th, AutoRechargeAmount: &amt})
+	if err != nil || w.AutoRechargeThreshold == nil || *w.AutoRechargeThreshold != 100000 {
+		t.Fatalf("SetAutoRecharge: %v / %+v", err, w)
+	}
+	ts3.assertRequest(http.MethodPut, "/wallets/wal_1/auto-recharge")
+}
+
+func TestSubscriptionsSetCommitment(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"sub_1","commitment_amount":5000000}}`)
+	sub, err := ts.client.Subscriptions.SetCommitment(context.Background(), "sub_1", 5000000)
+	if err != nil {
+		t.Fatalf("SetCommitment: %v", err)
+	}
+	ts.assertRequest(http.MethodPut, "/subscriptions/sub_1/commitment")
+	if got := ts.bodyMap()["amount"]; got != float64(5000000) {
+		t.Errorf("body amount = %v, want 5000000", got)
+	}
+	_ = sub
+}
+
+func TestUsageAlertsLifecycle(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"data":{"id":"ua_1","metric_code":"api_calls","threshold_type":"quantity","threshold":1000000}}`)
+	a, err := ts.client.UsageAlerts.Create(context.Background(), &UsageAlertCreateParams{
+		SubscriptionID: "sub_1", MetricCode: "api_calls", ThresholdType: "quantity", Threshold: 1000000,
+	})
+	if err != nil || a.Threshold != 1000000 {
+		t.Fatalf("Create: %v / %+v", err, a)
+	}
+	ts.assertRequest(http.MethodPost, "/usage-alerts")
+
+	ts2 := newTestServer(t, http.StatusOK, `{"data":[{"id":"ua_1"}]}`)
+	list, err := ts2.client.UsageAlerts.List(context.Background(), "sub_1")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: %v / %+v", err, list)
+	}
+	ts2.assertRequest(http.MethodGet, "/usage-alerts")
+	if ts2.query != "subscription_id=sub_1" {
+		t.Errorf("query = %q", ts2.query)
+	}
+
+	ts3 := newTestServer(t, http.StatusNoContent, ``)
+	if err := ts3.client.UsageAlerts.Delete(context.Background(), "ua_1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	ts3.assertRequest(http.MethodDelete, "/usage-alerts/ua_1")
+}
+
+func TestUsageRecordBatch(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"index":0,"status":"recorded","event_id":"evt_1"},{"index":1,"status":"duplicate","event_id":"evt_0"}]}`)
+	results, err := ts.client.Usage.RecordBatch(context.Background(), []UsageRecordParams{
+		{SubscriptionID: "sub_1", CustomerID: "cus_1", Dimension: "api_calls", Quantity: 10, TransactionID: "t-1"},
+		{SubscriptionID: "sub_1", CustomerID: "cus_1", Dimension: "api_calls", Quantity: 10, TransactionID: "t-0"},
+	})
+	if err != nil {
+		t.Fatalf("RecordBatch: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/usage/events/batch")
+	if len(results) != 2 || results[1].Status != "duplicate" {
+		t.Errorf("results = %+v", results)
+	}
+}
+
+func TestAuditLogsList(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"al_1","actor":"api_key","action":"PUT /v1/plans/:id/charges","entity_type":"plans","status":200}]}`)
+	logs, err := ts.client.AuditLogs.List(context.Background(), &AuditLogListParams{EntityType: "plans", Limit: 50})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/audit-logs")
+	if ts.query != "entity_type=plans&limit=50" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if len(logs) != 1 || logs[0].EntityType != "plans" {
+		t.Errorf("logs = %+v", logs)
+	}
+}
