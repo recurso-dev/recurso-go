@@ -41,6 +41,10 @@ type SubscriptionCreateParams struct {
 	StartDate         string `json:"start_date,omitempty"`
 	BillingAnchorType string `json:"billing_anchor_type,omitempty"`
 	PaymentTerms      string `json:"payment_terms,omitempty"`
+	// TrialDays, when greater than zero, starts the subscription in
+	// "trialing" and converts it to "active" (issuing the first invoice)
+	// when the trial ends.
+	TrialDays int `json:"trial_days,omitempty"`
 }
 
 // SubscriptionListParams filters the subscription list.

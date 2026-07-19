@@ -31,6 +31,10 @@ type CreditNoteCreateParams struct {
 	Amount     int64  `json:"amount"`
 	Currency   string `json:"currency"`
 	Reason     string `json:"reason,omitempty"`
+	// Type is "adjustment" (default, issues account credit) or "refund"
+	// (calls the gateway's refund API against the paid invoice in InvoiceID
+	// and posts a Refunds-vs-Cash ledger reversal).
+	Type string `json:"type,omitempty"`
 }
 
 // CreditNoteListParams filters the credit-note list.
