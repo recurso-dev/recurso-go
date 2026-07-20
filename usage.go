@@ -21,6 +21,27 @@ type UsageDimension struct {
 	LastSeen   time.Time `json:"last_seen"`
 }
 
+// UsageEvent is one raw ingested usage event.
+type UsageEvent struct {
+	ID             string            `json:"id"`
+	SubscriptionID string            `json:"subscription_id"`
+	CustomerID     string            `json:"customer_id"`
+	Dimension      string            `json:"dimension"`
+	Quantity       int64             `json:"quantity"`
+	Timestamp      time.Time         `json:"timestamp"`
+	Properties     map[string]string `json:"properties,omitempty"`
+	TransactionID  string            `json:"transaction_id,omitempty"`
+}
+
+// UsageEventListParams filters the raw usage-event stream. Limit is capped at
+// 200 (server default 50).
+type UsageEventListParams struct {
+	CustomerID string
+	Dimension  string
+	Limit      int
+	Offset     int
+}
+
 // UsageRecordParams reports a metered usage event. Properties are optional
 // free-form attributes (max 20; keys ≤100 chars, values ≤255) — the
 // "unique" billable-metric aggregation counts distinct values of one.
@@ -71,6 +92,23 @@ func (s *UsageService) Record(ctx context.Context, params *UsageRecordParams) (*
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ListEvents returns the tenant's raw ingested usage events, newest first —
+// for debugging metering ("did my events actually land?").
+func (s *UsageService) ListEvents(ctx context.Context, params *UsageEventListParams) ([]UsageEvent, error) {
+	path := "/usage/events"
+	if params != nil {
+		q := newQuery().
+			str("customer_id", params.CustomerID).
+			str("dimension", params.Dimension).
+			int("limit", params.Limit)
+		if params.Offset != 0 {
+			q.int("offset", params.Offset)
+		}
+		path = q.apply(path)
+	}
+	return getData[[]UsageEvent](ctx, s.client, http.MethodGet, path, nil)
 }
 
 // Query aggregates usage events into time buckets over a window.

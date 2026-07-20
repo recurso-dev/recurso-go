@@ -979,3 +979,30 @@ func TestDunningCampaignsLifecycle(t *testing.T) {
 	}
 	ts4.assertRequest(http.MethodDelete, "/dunning-campaigns/steps/dcs_1")
 }
+
+func TestWebhooksUpdateStatus(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"status":"inactive"}`)
+	res, err := ts.client.Webhooks.UpdateStatus(context.Background(), "wh_1", &WebhookStatusParams{Status: "inactive"})
+	if err != nil || res.Status != "inactive" {
+		t.Fatalf("UpdateStatus: %v / %+v", err, res)
+	}
+	ts.assertRequest(http.MethodPut, "/webhooks/wh_1/status")
+	if ts.bodyMap()["status"] != "inactive" {
+		t.Errorf("body = %s", ts.body)
+	}
+}
+
+func TestUsageListEvents(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"ue_1","subscription_id":"sub_1","customer_id":"cus_1","dimension":"api_calls","quantity":10,"transaction_id":"t-1"}]}`)
+	events, err := ts.client.Usage.ListEvents(context.Background(), &UsageEventListParams{CustomerID: "cus_1", Dimension: "api_calls", Limit: 100, Offset: 50})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/usage/events")
+	if ts.query != "customer_id=cus_1&dimension=api_calls&limit=100&offset=50" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if len(events) != 1 || events[0].Dimension != "api_calls" || events[0].Quantity != 10 {
+		t.Errorf("events = %+v", events)
+	}
+}

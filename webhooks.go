@@ -39,6 +39,12 @@ type WebhookCreateParams struct {
 	Events []string `json:"events"`
 }
 
+// WebhookStatusParams pauses or resumes a webhook endpoint. Status is
+// "active" or "inactive".
+type WebhookStatusParams struct {
+	Status string `json:"status"`
+}
+
 // DeliveryListParams filters an endpoint's deliveries.
 type DeliveryListParams struct {
 	Limit  int
@@ -61,6 +67,17 @@ func (s *WebhooksService) Create(ctx context.Context, params *WebhookCreateParam
 // List returns the tenant's webhook endpoints (secrets omitted).
 func (s *WebhooksService) List(ctx context.Context) ([]WebhookEndpoint, error) {
 	return getData[[]WebhookEndpoint](ctx, s.client, http.MethodGet, "/webhooks", nil)
+}
+
+// UpdateStatus pauses ("inactive") or resumes ("active") a webhook endpoint.
+// Paused endpoints stop receiving deliveries but keep their secret and
+// configuration.
+func (s *WebhooksService) UpdateStatus(ctx context.Context, id string, params *WebhookStatusParams) (*StatusResponse, error) {
+	var out StatusResponse
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/webhooks/%s/status", id), params, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // Delete removes a webhook endpoint.
