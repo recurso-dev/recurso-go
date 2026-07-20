@@ -42,6 +42,18 @@ type PlanCreateParams struct {
 	HSNCode       string `json:"hsn_code,omitempty"`
 }
 
+// PlanUpdateParams is the body for updating a plan. Omitted fields are left
+// unchanged. Set Active to false to archive the plan (hides it from new
+// subscriptions without affecting existing ones) and to true to restore it.
+// The plan's price is a separate versioned entity and is not editable here.
+type PlanUpdateParams struct {
+	Name          string `json:"name,omitempty"`
+	HSNCode       string `json:"hsn_code,omitempty"`
+	IntervalUnit  string `json:"interval_unit,omitempty"`
+	IntervalCount int    `json:"interval_count,omitempty"`
+	Active        *bool  `json:"active,omitempty"`
+}
+
 // PlanListParams filters the plan list.
 type PlanListParams struct {
 	Q     string
@@ -56,6 +68,25 @@ type PlansService struct{ client *Client }
 func (s *PlansService) Create(ctx context.Context, params *PlanCreateParams) (*Plan, error) {
 	var out Plan
 	if err := s.client.do(ctx, http.MethodPost, "/plans", params, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Get retrieves a plan by ID.
+func (s *PlansService) Get(ctx context.Context, id string) (*Plan, error) {
+	out, err := getData[Plan](ctx, s.client, http.MethodGet, "/plans/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Update partially updates a plan. Set Active in params to archive or restore
+// it.
+func (s *PlansService) Update(ctx context.Context, id string, params *PlanUpdateParams) (*Plan, error) {
+	var out Plan
+	if err := s.client.do(ctx, http.MethodPut, "/plans/"+id, params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

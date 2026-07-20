@@ -54,6 +54,26 @@ type CustomerCreateParams struct {
 	Country       string `json:"country,omitempty"`
 }
 
+// CustomerUpdateParams is the body for updating a customer. Omitted fields are
+// left unchanged. Set Active to false to archive the customer (refused while
+// the customer has active subscriptions) and to true to restore it; archived
+// customers keep full billing history.
+type CustomerUpdateParams struct {
+	Name          string `json:"name,omitempty"`
+	Email         string `json:"email,omitempty"`
+	Phone         string `json:"phone,omitempty"`
+	TaxID         string `json:"tax_id,omitempty"`
+	GSTIN         string `json:"gstin,omitempty"`
+	TaxType       string `json:"tax_type,omitempty"`
+	PlaceOfSupply string `json:"place_of_supply,omitempty"`
+	Line1         string `json:"line1,omitempty"`
+	City          string `json:"city,omitempty"`
+	State         string `json:"state,omitempty"`
+	Zip           string `json:"zip,omitempty"`
+	Country       string `json:"country,omitempty"`
+	Active        *bool  `json:"active,omitempty"`
+}
+
 // CustomerListParams filters the customer list.
 type CustomerListParams struct {
 	Q       string
@@ -141,6 +161,25 @@ func (s *CustomersService) List(ctx context.Context, params *CustomerListParams)
 			apply(path)
 	}
 	return getData[[]Customer](ctx, s.client, http.MethodGet, path, nil)
+}
+
+// Get retrieves a customer by ID.
+func (s *CustomersService) Get(ctx context.Context, id string) (*Customer, error) {
+	out, err := getData[Customer](ctx, s.client, http.MethodGet, "/customers/"+id, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Update partially updates a customer. Set Active in params to archive or
+// restore it.
+func (s *CustomersService) Update(ctx context.Context, id string, params *CustomerUpdateParams) (*Customer, error) {
+	out, err := getData[Customer](ctx, s.client, http.MethodPut, "/customers/"+id, params)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // UpdatePaymentMethod replaces the customer's card on file.

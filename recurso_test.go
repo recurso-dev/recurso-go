@@ -734,3 +734,275 @@ func TestAuditLogsList(t *testing.T) {
 		t.Errorf("logs = %+v", logs)
 	}
 }
+
+func TestPlansGetUpdate(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"plan_1","name":"Pro","active":true}}`)
+	plan, err := ts.client.Plans.Get(context.Background(), "plan_1")
+	if err != nil || plan.Name != "Pro" {
+		t.Fatalf("Get: %v / %+v", err, plan)
+	}
+	ts.assertRequest(http.MethodGet, "/plans/plan_1")
+
+	ts2 := newTestServer(t, http.StatusOK, `{"id":"plan_1","name":"Pro","active":false}`)
+	archived := false
+	plan, err = ts2.client.Plans.Update(context.Background(), "plan_1", &PlanUpdateParams{Active: &archived})
+	if err != nil || plan.Active {
+		t.Fatalf("Update: %v / %+v", err, plan)
+	}
+	ts2.assertRequest(http.MethodPut, "/plans/plan_1")
+	if ts2.bodyMap()["active"] != false {
+		t.Errorf("body = %s", ts2.body)
+	}
+}
+
+func TestCustomersGetUpdate(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"cus_1","email":"jane@example.com"}}`)
+	cus, err := ts.client.Customers.Get(context.Background(), "cus_1")
+	if err != nil || cus.Email != "jane@example.com" {
+		t.Fatalf("Get: %v / %+v", err, cus)
+	}
+	ts.assertRequest(http.MethodGet, "/customers/cus_1")
+
+	ts2 := newTestServer(t, http.StatusOK, `{"data":{"id":"cus_1","name":"Jane Q. User"}}`)
+	cus, err = ts2.client.Customers.Update(context.Background(), "cus_1", &CustomerUpdateParams{Name: "Jane Q. User"})
+	if err != nil || cus.Name != "Jane Q. User" {
+		t.Fatalf("Update: %v / %+v", err, cus)
+	}
+	ts2.assertRequest(http.MethodPut, "/customers/cus_1")
+	body := ts2.bodyMap()
+	if body["name"] != "Jane Q. User" {
+		t.Errorf("body = %s", ts2.body)
+	}
+	if _, ok := body["active"]; ok {
+		t.Errorf("omitted active was sent: %s", ts2.body)
+	}
+}
+
+func TestCouponsUpdate(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"status":"deactivated"}`)
+	res, err := ts.client.Coupons.Update(context.Background(), "cpn_1", &CouponUpdateParams{Active: false})
+	if err != nil || res.Status != "deactivated" {
+		t.Fatalf("Update: %v / %+v", err, res)
+	}
+	ts.assertRequest(http.MethodPut, "/coupons/cpn_1")
+	if ts.bodyMap()["active"] != false {
+		t.Errorf("body = %s", ts.body)
+	}
+}
+
+func TestOrganizationsLifecycle(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"org_1","name":"Acme Group","owner_email":"ceo@acme.com"}`)
+	org, err := ts.client.Organizations.Create(context.Background(), &OrganizationCreateParams{Name: "Acme Group", OwnerEmail: "ceo@acme.com"})
+	if err != nil || org.ID != "org_1" {
+		t.Fatalf("Create: %v / %+v", err, org)
+	}
+	ts.assertRequest(http.MethodPost, "/organizations")
+
+	ts2 := newTestServer(t, http.StatusOK, `{"data":{"id":"org_1","name":"Acme Holdings"}}`)
+	org, err = ts2.client.Organizations.Update(context.Background(), "org_1", &OrganizationUpdateParams{Name: "Acme Holdings"})
+	if err != nil || org.Name != "Acme Holdings" {
+		t.Fatalf("Update: %v / %+v", err, org)
+	}
+	ts2.assertRequest(http.MethodPut, "/organizations/org_1")
+
+	ts3 := newTestServer(t, http.StatusOK, `{"status":"added"}`)
+	res, err := ts3.client.Organizations.AddTenant(context.Background(), "org_1", "ten_1")
+	if err != nil || res.Status != "added" {
+		t.Fatalf("AddTenant: %v / %+v", err, res)
+	}
+	ts3.assertRequest(http.MethodPost, "/organizations/org_1/tenants")
+	if ts3.bodyMap()["tenant_id"] != "ten_1" {
+		t.Errorf("body = %s", ts3.body)
+	}
+
+	ts4 := newTestServer(t, http.StatusOK, `{"data":{"normalized_mrr":250000,"reporting_currency":"USD","by_currency":[{"currency":"INR","total_mrr":9900000,"by_tenant":[{"tenant_id":"ten_1","mrr":9900000}]}]}}`)
+	mrr, err := ts4.client.Organizations.MRR(context.Background(), "org_1")
+	if err != nil || mrr.NormalizedMRR != 250000 || len(mrr.ByCurrency) != 1 {
+		t.Fatalf("MRR: %v / %+v", err, mrr)
+	}
+	ts4.assertRequest(http.MethodGet, "/organizations/org_1/analytics/mrr")
+}
+
+func TestAccountingConnectToken(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"data":{"id":"acc_1","provider":"netsuite","realm_id":"ACME123","sync_status":"idle","is_active":true}}`)
+	conn, err := ts.client.Accounting.ConnectToken(context.Background(), "netsuite", &AccountingConnectTokenParams{AccountID: "ACME123", AccessToken: "tok"})
+	if err != nil || conn.Provider != "netsuite" || !conn.IsActive {
+		t.Fatalf("ConnectToken: %v / %+v", err, conn)
+	}
+	ts.assertRequest(http.MethodPost, "/accounting/connect-token/netsuite")
+	if ts.bodyMap()["account_id"] != "ACME123" {
+		t.Errorf("body = %s", ts.body)
+	}
+
+	ts2 := newTestServer(t, http.StatusOK, `{"status":"sync_triggered"}`)
+	res, err := ts2.client.Accounting.Sync(context.Background())
+	if err != nil || res.Status != "sync_triggered" {
+		t.Fatalf("Sync: %v / %+v", err, res)
+	}
+	ts2.assertRequest(http.MethodPost, "/accounting/sync")
+
+	ts3 := newTestServer(t, http.StatusOK, `{"data":[{"id":"log_1","entity_type":"invoice","status":"synced"}]}`)
+	logs, err := ts3.client.Accounting.SyncStatus(context.Background())
+	if err != nil || len(logs) != 1 || logs[0].EntityType != "invoice" {
+		t.Fatalf("SyncStatus: %v / %+v", err, logs)
+	}
+	ts3.assertRequest(http.MethodGet, "/accounting/sync/status")
+}
+
+func TestVirtualAccountsCreate(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"va_1","customer_id":"cus_1","account_number":"2223330001","ifsc_code":"RAZR0000001","amount_expected":590000}`)
+	va, err := ts.client.VirtualAccounts.Create(context.Background(), &VirtualAccountCreateParams{CustomerID: "cus_1", InvoiceID: "inv_1", Amount: 590000})
+	if err != nil || va.AccountNumber != "2223330001" {
+		t.Fatalf("Create: %v / %+v", err, va)
+	}
+	ts.assertRequest(http.MethodPost, "/virtual-accounts")
+	if ts.bodyMap()["invoice_id"] != "inv_1" {
+		t.Errorf("body = %s", ts.body)
+	}
+}
+
+func TestOfflinePaymentsRecord(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"op_1","payment_type":"bank_transfer","amount":580000,"tds_amount":10000,"currency":"INR"}`)
+	p, err := ts.client.OfflinePayments.Record(context.Background(), &OfflinePaymentRecordParams{
+		CustomerID: "cus_1", InvoiceID: "inv_1", PaymentType: "bank_transfer", Amount: 580000, TDSAmount: 10000, ReferenceNumber: "NEFT-1",
+	})
+	if err != nil || p.TDSAmount != 10000 {
+		t.Fatalf("Record: %v / %+v", err, p)
+	}
+	ts.assertRequest(http.MethodPost, "/payments/offline")
+	if ts.bodyMap()["reference_number"] != "NEFT-1" {
+		t.Errorf("body = %s", ts.body)
+	}
+}
+
+func TestChurnHighRiskAndAlerts(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"customer_id":"cus_1","score":85,"risk_level":"high"}]}`)
+	scores, err := ts.client.Churn.HighRisk(context.Background(), 80)
+	if err != nil || len(scores) != 1 || scores[0].Score != 85 {
+		t.Fatalf("HighRisk: %v / %+v", err, scores)
+	}
+	ts.assertRequest(http.MethodGet, "/churn/high-risk")
+	if ts.query != "threshold=80" {
+		t.Errorf("query = %q", ts.query)
+	}
+
+	ts2 := newTestServer(t, http.StatusOK, `{"data":[{"id":"ca_1","customer_id":"cus_1","new_score":85,"acknowledged":false}]}`)
+	alerts, err := ts2.client.Churn.Alerts(context.Background())
+	if err != nil || len(alerts) != 1 || alerts[0].NewScore != 85 {
+		t.Fatalf("Alerts: %v / %+v", err, alerts)
+	}
+	ts2.assertRequest(http.MethodGet, "/churn/alerts")
+
+	ts3 := newTestServer(t, http.StatusOK, `{"status":"acknowledged"}`)
+	res, err := ts3.client.Churn.AcknowledgeAlert(context.Background(), "ca_1")
+	if err != nil || res.Status != "acknowledged" {
+		t.Fatalf("AcknowledgeAlert: %v / %+v", err, res)
+	}
+	ts3.assertRequest(http.MethodPost, "/churn/alerts/ca_1/ack")
+}
+
+func TestCancelFlowsLifecycle(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"cf_1","name":"Default","is_default":true,"cooldown_days":30}`)
+	flow, err := ts.client.CancelFlows.Create(context.Background(), &CancelFlowCreateParams{Name: "Default", IsDefault: true})
+	if err != nil || flow.ID != "cf_1" {
+		t.Fatalf("Create: %v / %+v", err, flow)
+	}
+	ts.assertRequest(http.MethodPost, "/cancel-flows")
+
+	ts2 := newTestServer(t, http.StatusOK, `[{"id":"cf_1","name":"Default"}]`)
+	flows, err := ts2.client.CancelFlows.List(context.Background())
+	if err != nil || len(flows) != 1 {
+		t.Fatalf("List: %v / %+v", err, flows)
+	}
+	ts2.assertRequest(http.MethodGet, "/cancel-flows")
+
+	ts3 := newTestServer(t, http.StatusCreated, `{"id":"cfs_1","flow_id":"cf_1","step_order":1,"step_type":"survey","config":{"reasons":["too_expensive"]}}`)
+	step, err := ts3.client.CancelFlows.AddStep(context.Background(), "cf_1", &CancelFlowStepCreateParams{
+		StepOrder: 1, StepType: "survey", Config: json.RawMessage(`{"reasons":["too_expensive"]}`),
+	})
+	if err != nil || step.StepType != "survey" {
+		t.Fatalf("AddStep: %v / %+v", err, step)
+	}
+	ts3.assertRequest(http.MethodPost, "/cancel-flows/cf_1/steps")
+
+	ts4 := newTestServer(t, http.StatusCreated, `{"session_id":"sess_1","flow_id":"cf_1","first_step":{"id":"cfs_1","step_type":"survey"}}`)
+	start, err := ts4.client.CancelFlows.StartSession(context.Background(), &CancelFlowSessionStartParams{CustomerID: "cus_1", SubscriptionID: "sub_1"})
+	if err != nil || start.SessionID != "sess_1" || start.FirstStep == nil {
+		t.Fatalf("StartSession: %v / %+v", err, start)
+	}
+	ts4.assertRequest(http.MethodPost, "/cancel-flows/sessions/start")
+
+	ts5 := newTestServer(t, http.StatusOK, `{"session_id":"sess_1","status":"saved","saved_by_offer":true,"completed":true}`)
+	sub, err := ts5.client.CancelFlows.SubmitStep(context.Background(), "sess_1", &CancelFlowSubmitParams{StepIndex: 1, Response: map[string]any{"accepted": true}})
+	if err != nil || !sub.SavedByOffer {
+		t.Fatalf("SubmitStep: %v / %+v", err, sub)
+	}
+	ts5.assertRequest(http.MethodPost, "/cancel-flows/sessions/sess_1/submit")
+
+	ts6 := newTestServer(t, http.StatusOK, `{"total_sessions":10,"saved_count":4,"save_rate":0.4,"reason_breakdown":{"too_expensive":6}}`)
+	stats, err := ts6.client.CancelFlows.Stats(context.Background(), "cf_1")
+	if err != nil || stats.SavedCount != 4 || stats.ReasonBreakdown["too_expensive"] != 6 {
+		t.Fatalf("Stats: %v / %+v", err, stats)
+	}
+	ts6.assertRequest(http.MethodGet, "/cancel-flows/stats")
+	if ts6.query != "flow_id=cf_1" {
+		t.Errorf("query = %q", ts6.query)
+	}
+}
+
+func TestDunningCampaignsLifecycle(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"dc_1","name":"Failed payments","trigger_event":"payment_failed"}`)
+	c, err := ts.client.DunningCampaigns.Create(context.Background(), &DunningCampaignCreateParams{Name: "Failed payments", TriggerEvent: "payment_failed"})
+	if err != nil || c.TriggerEvent != "payment_failed" {
+		t.Fatalf("Create: %v / %+v", err, c)
+	}
+	ts.assertRequest(http.MethodPost, "/dunning-campaigns")
+
+	ts2 := newTestServer(t, http.StatusOK, `[{"id":"dc_1","name":"Failed payments","is_active":true}]`)
+	list, err := ts2.client.DunningCampaigns.List(context.Background())
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List: %v / %+v", err, list)
+	}
+	ts2.assertRequest(http.MethodGet, "/dunning-campaigns")
+
+	ts3 := newTestServer(t, http.StatusCreated, `{"id":"dcs_1","campaign_id":"dc_1","step_order":1,"channel":"email","delay_hours":24,"is_payment_wall":false}`)
+	step, err := ts3.client.DunningCampaigns.AddStep(context.Background(), "dc_1", &DunningStepCreateParams{StepOrder: 1, Channel: "email", DelayHours: 24, Subject: "Payment failed"})
+	if err != nil || step.Channel != "email" {
+		t.Fatalf("AddStep: %v / %+v", err, step)
+	}
+	ts3.assertRequest(http.MethodPost, "/dunning-campaigns/dc_1/steps")
+
+	ts4 := newTestServer(t, http.StatusOK, `{"status":"deleted"}`)
+	res, err := ts4.client.DunningCampaigns.DeleteStep(context.Background(), "dcs_1")
+	if err != nil || res.Status != "deleted" {
+		t.Fatalf("DeleteStep: %v / %+v", err, res)
+	}
+	ts4.assertRequest(http.MethodDelete, "/dunning-campaigns/steps/dcs_1")
+}
+
+func TestWebhooksUpdateStatus(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"status":"inactive"}`)
+	res, err := ts.client.Webhooks.UpdateStatus(context.Background(), "wh_1", &WebhookStatusParams{Status: "inactive"})
+	if err != nil || res.Status != "inactive" {
+		t.Fatalf("UpdateStatus: %v / %+v", err, res)
+	}
+	ts.assertRequest(http.MethodPut, "/webhooks/wh_1/status")
+	if ts.bodyMap()["status"] != "inactive" {
+		t.Errorf("body = %s", ts.body)
+	}
+}
+
+func TestUsageListEvents(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"ue_1","subscription_id":"sub_1","customer_id":"cus_1","dimension":"api_calls","quantity":10,"transaction_id":"t-1"}]}`)
+	events, err := ts.client.Usage.ListEvents(context.Background(), &UsageEventListParams{CustomerID: "cus_1", Dimension: "api_calls", Limit: 100, Offset: 50})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/usage/events")
+	if ts.query != "customer_id=cus_1&dimension=api_calls&limit=100&offset=50" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if len(events) != 1 || events[0].Dimension != "api_calls" || events[0].Quantity != 10 {
+		t.Errorf("events = %+v", events)
+	}
+}
