@@ -100,8 +100,10 @@ Every endpoint hangs off a resource field on the `Client`, e.g.
 `client.Usage`, `client.Coupons`, `client.Quotes`, `client.Entitlements`,
 `client.Webhooks`, `client.Events`, `client.CreditNotes`, `client.Gifts`,
 `client.Referrals`, `client.Mandates`, `client.Ledger`, `client.Analytics`,
-`client.Developer`, and `client.Account`. Every method takes a
-`context.Context` first and returns `(T, error)`.
+`client.Developer`, `client.Account`, `client.Organizations`,
+`client.Accounting`, `client.OfflinePayments`, `client.VirtualAccounts`,
+`client.Churn`, `client.CancelFlows`, and `client.DunningCampaigns`. Every
+method takes a `context.Context` first and returns `(T, error)`.
 
 ## Error handling
 

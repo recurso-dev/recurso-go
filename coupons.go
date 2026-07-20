@@ -30,6 +30,13 @@ type CouponCreateParams struct {
 	DurationMonths int    `json:"duration_months,omitempty"`
 }
 
+// CouponUpdateParams flips a coupon's redemption gate. Active false stops new
+// subscriptions from redeeming the code (existing subscriptions keep their
+// applied discount); Active true restores redeemability.
+type CouponUpdateParams struct {
+	Active bool `json:"active"`
+}
+
 // CouponsService groups the coupon endpoints.
 type CouponsService struct{ client *Client }
 
@@ -37,6 +44,16 @@ type CouponsService struct{ client *Client }
 func (s *CouponsService) Create(ctx context.Context, params *CouponCreateParams) (*Coupon, error) {
 	var out Coupon
 	if err := s.client.do(ctx, http.MethodPost, "/coupons", params, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Update deactivates or reactivates a coupon. The returned status is
+// "activated" or "deactivated".
+func (s *CouponsService) Update(ctx context.Context, id string, params *CouponUpdateParams) (*StatusResponse, error) {
+	var out StatusResponse
+	if err := s.client.do(ctx, http.MethodPut, "/coupons/"+id, params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

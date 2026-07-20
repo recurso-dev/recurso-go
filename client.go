@@ -23,28 +23,35 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 
-	Account         *AccountService
-	Analytics       *AnalyticsService
-	AuditLogs       *AuditLogsService
-	BillableMetrics *BillableMetricsService
-	Coupons         *CouponsService
-	CreditNotes     *CreditNotesService
-	Customers       *CustomersService
-	Developer       *DeveloperService
-	Entitlements    *EntitlementsService
-	Events          *EventsService
-	Gifts           *GiftsService
-	Invoices        *InvoicesService
-	Ledger          *LedgerService
-	Mandates        *MandatesService
-	Plans           *PlansService
-	Quotes          *QuotesService
-	Referrals       *ReferralsService
-	Subscriptions   *SubscriptionsService
-	Usage           *UsageService
-	UsageAlerts     *UsageAlertsService
-	Wallets         *WalletsService
-	Webhooks        *WebhooksService
+	Account          *AccountService
+	Accounting       *AccountingService
+	Analytics        *AnalyticsService
+	AuditLogs        *AuditLogsService
+	BillableMetrics  *BillableMetricsService
+	CancelFlows      *CancelFlowsService
+	Churn            *ChurnService
+	Coupons          *CouponsService
+	CreditNotes      *CreditNotesService
+	Customers        *CustomersService
+	Developer        *DeveloperService
+	DunningCampaigns *DunningCampaignsService
+	Entitlements     *EntitlementsService
+	Events           *EventsService
+	Gifts            *GiftsService
+	Invoices         *InvoicesService
+	Ledger           *LedgerService
+	Mandates         *MandatesService
+	OfflinePayments  *OfflinePaymentsService
+	Organizations    *OrganizationsService
+	Plans            *PlansService
+	Quotes           *QuotesService
+	Referrals        *ReferralsService
+	Subscriptions    *SubscriptionsService
+	Usage            *UsageService
+	UsageAlerts      *UsageAlertsService
+	VirtualAccounts  *VirtualAccountsService
+	Wallets          *WalletsService
+	Webhooks         *WebhooksService
 }
 
 // Option configures a Client. Pass options to NewClient.
@@ -81,20 +88,27 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	}
 
 	c.Account = &AccountService{client: c}
+	c.Accounting = &AccountingService{client: c}
 	c.Analytics = &AnalyticsService{client: c}
 	c.Coupons = &CouponsService{client: c}
 	c.AuditLogs = &AuditLogsService{client: c}
 	c.BillableMetrics = &BillableMetricsService{client: c}
+	c.CancelFlows = &CancelFlowsService{client: c}
+	c.Churn = &ChurnService{client: c}
 	c.CreditNotes = &CreditNotesService{client: c}
 	c.Customers = &CustomersService{client: c}
 	c.Developer = &DeveloperService{client: c}
+	c.DunningCampaigns = &DunningCampaignsService{client: c}
 	c.Entitlements = &EntitlementsService{client: c}
 	c.Events = &EventsService{client: c}
 	c.Gifts = &GiftsService{client: c}
 	c.Invoices = &InvoicesService{client: c}
 	c.Ledger = &LedgerService{client: c}
 	c.Mandates = &MandatesService{client: c}
+	c.OfflinePayments = &OfflinePaymentsService{client: c}
+	c.Organizations = &OrganizationsService{client: c}
 	c.Plans = &PlansService{client: c}
+	c.VirtualAccounts = &VirtualAccountsService{client: c}
 	c.Quotes = &QuotesService{client: c}
 	c.Referrals = &ReferralsService{client: c}
 	c.Subscriptions = &SubscriptionsService{client: c}
