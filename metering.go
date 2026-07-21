@@ -14,20 +14,30 @@ type BillableMetric struct {
 	TenantID        string    `json:"tenant_id"`
 	Name            string    `json:"name"`
 	Code            string    `json:"code"`
-	AggregationType string    `json:"aggregation_type"` // count | sum | max | unique | latest | percentile (field_name holds the percentile 1-99)
+	AggregationType string    `json:"aggregation_type"` // count | sum | max | unique | latest | percentile | weighted_sum | custom (field_name holds the percentile 1-99)
 	FieldName       string    `json:"field_name,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// Expression is the per-event formula for the "custom" aggregation (e.g.
+	// "quantity * properties.multiplier"); its results are summed over the
+	// period. Set only for custom, empty otherwise.
+	Expression string    `json:"expression,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // BillableMetricParams creates or updates a metric. Code is immutable after
 // creation. FieldName is required for the "unique" aggregation (the event
-// property whose distinct values are counted) and forbidden otherwise.
+// property whose distinct values are counted) and the "percentile" aggregation
+// (the percentile 1-99), and forbidden otherwise. Expression is required for
+// the "custom" aggregation (a sandboxed per-event formula over "quantity" and
+// numeric "properties.*", summed over the period) and forbidden otherwise.
+// "weighted_sum" (time-weighted average of a running level built from per-event
+// deltas) takes neither.
 type BillableMetricParams struct {
 	Name            string `json:"name"`
 	Code            string `json:"code"`
 	AggregationType string `json:"aggregation_type"`
 	FieldName       string `json:"field_name,omitempty"`
+	Expression      string `json:"expression,omitempty"`
 }
 
 // ChargeTier is one band of a graduated, volume, or graduated_percentage
