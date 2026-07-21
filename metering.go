@@ -14,7 +14,7 @@ type BillableMetric struct {
 	TenantID        string    `json:"tenant_id"`
 	Name            string    `json:"name"`
 	Code            string    `json:"code"`
-	AggregationType string    `json:"aggregation_type"` // "count" | "sum" | "max" | "unique"
+	AggregationType string    `json:"aggregation_type"` // count | sum | max | unique | latest | percentile (field_name holds the percentile 1-99)
 	FieldName       string    `json:"field_name,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -66,8 +66,12 @@ type Charge struct {
 	MetricID    string                   `json:"metric_id"`
 	ChargeModel string                   `json:"charge_model"` // per_unit | graduated | volume | package | percentage | graduated_percentage | dynamic
 	Amounts     map[string]ChargeAmounts `json:"amounts"`
-	HSNCode     string                   `json:"hsn_code,omitempty"`
-	Metric      *BillableMetric          `json:"metric,omitempty"`
+	// PayInAdvance rates the charge per usage event at ingestion time (captured
+	// as an unbilled charge, folded onto the next invoice). Only per_unit,
+	// percentage, and dynamic may set it.
+	PayInAdvance bool            `json:"pay_in_advance,omitempty"`
+	HSNCode      string          `json:"hsn_code,omitempty"`
+	Metric       *BillableMetric `json:"metric,omitempty"`
 }
 
 // ChargeParams is one charge in a plan's charge set (PUT replace semantics).
@@ -75,7 +79,9 @@ type ChargeParams struct {
 	MetricID    string                   `json:"metric_id"`
 	ChargeModel string                   `json:"charge_model"`
 	Amounts     map[string]ChargeAmounts `json:"amounts"`
-	HSNCode     string                   `json:"hsn_code,omitempty"`
+	// PayInAdvance: non-cumulative models only (per_unit/percentage/dynamic).
+	PayInAdvance bool   `json:"pay_in_advance,omitempty"`
+	HSNCode      string `json:"hsn_code,omitempty"`
 }
 
 // UsageAmountCharge is one charge's live preview entry.
