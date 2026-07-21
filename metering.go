@@ -30,22 +30,32 @@ type BillableMetricParams struct {
 	FieldName       string `json:"field_name,omitempty"`
 }
 
-// ChargeTier is one band of a graduated or volume charge. UpTo nil means
-// unbounded (last tier only). UnitAmount is a decimal string in MAJOR
-// currency units (e.g. "0.0035"); FlatAmount is minor units.
+// ChargeTier is one band of a graduated, volume, or graduated_percentage
+// charge. UpTo nil means unbounded (last tier only). UnitAmount (per-unit
+// tiers) is a decimal string in MAJOR currency units (e.g. "0.0035"); Rate
+// (graduated_percentage) is a percent decimal (e.g. "2.5"); FlatAmount is
+// minor units.
 type ChargeTier struct {
 	UpTo       *int64 `json:"up_to"`
-	UnitAmount string `json:"unit_amount"`
+	UnitAmount string `json:"unit_amount,omitempty"` // graduated | volume
+	Rate       string `json:"rate,omitempty"`        // graduated_percentage
 	FlatAmount int64  `json:"flat_amount,omitempty"`
 }
 
 // ChargeAmounts is a charge's pricing for one currency; which fields apply
-// depends on the charge model.
+// depends on the charge model. The percentage model prices a percentage of
+// the aggregated monetary base (minor units); dynamic carries no pricing (the
+// price is supplied per event as UsageRecordParams.DynamicAmount).
 type ChargeAmounts struct {
 	UnitAmount    string       `json:"unit_amount,omitempty"`    // per_unit
 	PackageAmount int64        `json:"package_amount,omitempty"` // package, minor units per bundle
 	PackageSize   int64        `json:"package_size,omitempty"`   // package, units per bundle
-	Tiers         []ChargeTier `json:"tiers,omitempty"`          // graduated | volume
+	Tiers         []ChargeTier `json:"tiers,omitempty"`          // graduated | volume | graduated_percentage
+	Rate          string       `json:"rate,omitempty"`           // percentage, percent decimal e.g. "2.5"
+	FixedAmount   int64        `json:"fixed_amount,omitempty"`   // percentage, flat fee (minor units)
+	FreeUnits     int64        `json:"free_units,omitempty"`     // percentage, base exempt (minor units)
+	MinAmount     int64        `json:"min_amount,omitempty"`     // percentage, floor (minor units; 0 = none)
+	MaxAmount     int64        `json:"max_amount,omitempty"`     // percentage, cap (minor units; 0 = none)
 }
 
 // Charge attaches usage pricing for a billable metric to a plan. Usage is
@@ -54,7 +64,7 @@ type Charge struct {
 	ID          string                   `json:"id"`
 	PlanID      string                   `json:"plan_id"`
 	MetricID    string                   `json:"metric_id"`
-	ChargeModel string                   `json:"charge_model"` // "per_unit" | "graduated" | "volume" | "package"
+	ChargeModel string                   `json:"charge_model"` // per_unit | graduated | volume | package | percentage | graduated_percentage | dynamic
 	Amounts     map[string]ChargeAmounts `json:"amounts"`
 	HSNCode     string                   `json:"hsn_code,omitempty"`
 	Metric      *BillableMetric          `json:"metric,omitempty"`

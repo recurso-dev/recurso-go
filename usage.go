@@ -31,6 +31,9 @@ type UsageEvent struct {
 	Timestamp      time.Time         `json:"timestamp"`
 	Properties     map[string]string `json:"properties,omitempty"`
 	TransactionID  string            `json:"transaction_id,omitempty"`
+	// DynamicAmount is the per-event exact price in minor units; a `dynamic`
+	// charge bills the sum over the period.
+	DynamicAmount int64 `json:"dynamic_amount,omitempty"`
 }
 
 // UsageEventListParams filters the raw usage-event stream. Limit is capped at
@@ -55,6 +58,9 @@ type UsageRecordParams struct {
 	// event with the same (subscription, transaction_id) collapses to the
 	// original.
 	TransactionID string `json:"transaction_id,omitempty"`
+	// DynamicAmount is the per-event exact price in minor units (non-negative);
+	// a `dynamic` charge bills the sum over the period.
+	DynamicAmount int64 `json:"dynamic_amount,omitempty"`
 }
 
 // UsageRecordResult is returned by Record.
