@@ -30,11 +30,13 @@ type Client struct {
 	BillableMetrics  *BillableMetricsService
 	CancelFlows      *CancelFlowsService
 	Churn            *ChurnService
+	Collections      *CollectionsService
 	Coupons          *CouponsService
 	CreditNotes      *CreditNotesService
 	Customers        *CustomersService
 	Developer        *DeveloperService
 	DunningCampaigns *DunningCampaignsService
+	Entities         *EntitiesService
 	Entitlements     *EntitlementsService
 	Events           *EventsService
 	Gifts            *GiftsService
@@ -95,10 +97,12 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.BillableMetrics = &BillableMetricsService{client: c}
 	c.CancelFlows = &CancelFlowsService{client: c}
 	c.Churn = &ChurnService{client: c}
+	c.Collections = &CollectionsService{client: c}
 	c.CreditNotes = &CreditNotesService{client: c}
 	c.Customers = &CustomersService{client: c}
 	c.Developer = &DeveloperService{client: c}
 	c.DunningCampaigns = &DunningCampaignsService{client: c}
+	c.Entities = &EntitiesService{client: c}
 	c.Entitlements = &EntitlementsService{client: c}
 	c.Events = &EventsService{client: c}
 	c.Gifts = &GiftsService{client: c}

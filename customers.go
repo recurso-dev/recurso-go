@@ -204,3 +204,45 @@ func (s *CustomersService) Churn(ctx context.Context, id string) (*ChurnScore, e
 func (s *CustomersService) Consents(ctx context.Context, id string) ([]Consent, error) {
 	return getData[[]Consent](ctx, s.client, http.MethodGet, fmt.Sprintf("/customers/%s/consents", id), nil)
 }
+
+// CreditBalance is the customer's spendable account credit in one
+// currency/entity (minor units).
+type CreditBalance struct {
+	Currency string  `json:"currency"`
+	EntityID *string `json:"entity_id,omitempty"`
+	Balance  int64   `json:"balance"`
+}
+
+// CreditApplication is one draw-down of account credit against an invoice.
+type CreditApplication struct {
+	CreditNoteID  string    `json:"credit_note_id"`
+	InvoiceID     string    `json:"invoice_id"`
+	InvoiceNumber string    `json:"invoice_number"`
+	Currency      string    `json:"currency"`
+	Amount        int64     `json:"amount"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+// CreditSummaryRow is the per-currency rollup of issued/applied/balance.
+type CreditSummaryRow struct {
+	Currency       string `json:"currency"`
+	TotalIssued    int64  `json:"total_issued"`
+	TotalApplied   int64  `json:"total_applied"`
+	CurrentBalance int64  `json:"current_balance"`
+}
+
+// CreditStatement is a customer's consolidated account-credit statement:
+// spendable balances, every grant (credit note), the invoice draw-down
+// history, and a per-currency rollup.
+type CreditStatement struct {
+	CustomerID   string              `json:"customer_id"`
+	Balances     []CreditBalance     `json:"balances"`
+	Grants       []CreditNote        `json:"grants"`
+	Applications []CreditApplication `json:"applications"`
+	Summary      []CreditSummaryRow  `json:"summary"`
+}
+
+// CreditStatement returns the customer's account-credit statement.
+func (s *CustomersService) CreditStatement(ctx context.Context, id string) (*CreditStatement, error) {
+	return getData[*CreditStatement](ctx, s.client, http.MethodGet, fmt.Sprintf("/customers/%s/credit-statement", id), nil)
+}

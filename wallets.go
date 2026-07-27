@@ -89,6 +89,22 @@ func (s *WalletsService) SetAutoRecharge(ctx context.Context, id string, params 
 	return getData[*Wallet](ctx, s.client, http.MethodPut, fmt.Sprintf("/wallets/%s/auto-recharge", id), params)
 }
 
+// WalletCloseResult reports the settled balance on closure (minor units).
+// Refunded is the paid residue owed back to the customer (the actual money
+// return is handled out of band, like a manual refund); Forfeited is the
+// promotional residue written off.
+type WalletCloseResult struct {
+	Refunded  int64 `json:"refunded"`
+	Forfeited int64 `json:"forfeited"`
+}
+
+// Close closes a wallet and settles its balance: paid residue is refunded,
+// promotional residue is forfeited, and the ledger legs are posted. A closed
+// wallet accepts no further top-ups or drains.
+func (s *WalletsService) Close(ctx context.Context, id string) (*WalletCloseResult, error) {
+	return getData[*WalletCloseResult](ctx, s.client, http.MethodPost, fmt.Sprintf("/wallets/%s/close", id), nil)
+}
+
 // SetCommitment sets the subscription's per-period minimum in minor units
 // (0 clears it): shortfalls bill a true-up line at period close.
 func (s *SubscriptionsService) SetCommitment(ctx context.Context, id string, amount int64) (*Subscription, error) {
@@ -130,6 +146,19 @@ func (s *UsageAlertsService) List(ctx context.Context, subscriptionID string) ([
 		path = newQuery().str("subscription_id", subscriptionID).apply(path)
 	}
 	return getData[[]UsageAlert](ctx, s.client, http.MethodGet, path, nil)
+}
+
+// UsageAlertUpdateParams re-aims an alert's threshold. Subscription and metric
+// are the alert's identity — to change those, delete and re-create.
+type UsageAlertUpdateParams struct {
+	ThresholdType string `json:"threshold_type"`
+	Threshold     int64  `json:"threshold"`
+}
+
+// Update edits an alert's threshold. Editing resets the once-per-period fired
+// lock, so the new threshold can fire in the current billing period.
+func (s *UsageAlertsService) Update(ctx context.Context, id string, params *UsageAlertUpdateParams) (*UsageAlert, error) {
+	return getData[*UsageAlert](ctx, s.client, http.MethodPut, fmt.Sprintf("/usage-alerts/%s", id), params)
 }
 
 // Delete removes an alert.
