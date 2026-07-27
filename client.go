@@ -40,6 +40,7 @@ type Client struct {
 	Entitlements     *EntitlementsService
 	Events           *EventsService
 	Gifts            *GiftsService
+	Disputes         *DisputesService
 	Invoices         *InvoicesService
 	Ledger           *LedgerService
 	Mandates         *MandatesService
@@ -106,6 +107,7 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.Entitlements = &EntitlementsService{client: c}
 	c.Events = &EventsService{client: c}
 	c.Gifts = &GiftsService{client: c}
+	c.Disputes = &DisputesService{client: c}
 	c.Invoices = &InvoicesService{client: c}
 	c.Ledger = &LedgerService{client: c}
 	c.Mandates = &MandatesService{client: c}

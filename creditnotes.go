@@ -40,6 +40,9 @@ type CreditNoteCreateParams struct {
 // CreditNoteListParams filters the credit-note list.
 type CreditNoteListParams struct {
 	CustomerID string
+	// Limit/Offset page the list; the API clamps at 1000 rows per call.
+	Limit  int
+	Offset int
 }
 
 // CreditNotesService groups the credit-note endpoints.
@@ -58,7 +61,7 @@ func (s *CreditNotesService) Create(ctx context.Context, params *CreditNoteCreat
 func (s *CreditNotesService) List(ctx context.Context, params *CreditNoteListParams) ([]CreditNote, error) {
 	path := "/credit-notes"
 	if params != nil {
-		path = newQuery().str("customer_id", params.CustomerID).apply(path)
+		path = newQuery().str("customer_id", params.CustomerID).int("limit", params.Limit).int("offset", params.Offset).apply(path)
 	}
 	return getData[[]CreditNote](ctx, s.client, http.MethodGet, path, nil)
 }

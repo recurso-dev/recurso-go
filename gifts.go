@@ -63,6 +63,25 @@ func (s *GiftsService) Redeem(ctx context.Context, params *GiftRedeemParams) (*S
 	return &out, nil
 }
 
+// GiftCancelResult reports what canceling a gift did on the money side:
+// a PAID purchase issues the buyer an account credit (CreditNote set), an
+// unpaid purchase invoice is voided (InvoiceVoided true).
+type GiftCancelResult struct {
+	Gift          Gift        `json:"gift"`
+	CreditNote    *CreditNote `json:"credit_note,omitempty"`
+	InvoiceVoided bool        `json:"invoice_voided"`
+}
+
+// Cancel cancels a purchased, unredeemed gift. The buyer is made whole
+// automatically; redeemed or already-canceled gifts return a conflict error.
+func (s *GiftsService) Cancel(ctx context.Context, id string) (*GiftCancelResult, error) {
+	out, err := getData[GiftCancelResult](ctx, s.client, http.MethodPost, "/gifts/"+id+"/cancel", nil)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // List returns the tenant's gift subscriptions.
 func (s *GiftsService) List(ctx context.Context, params *GiftListParams) ([]Gift, error) {
 	path := "/gifts"
