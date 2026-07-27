@@ -54,6 +54,9 @@ type QuoteListParams struct {
 	Status     string
 	CustomerID string
 	Search     string
+	// Limit/Offset page the list; the API clamps at 1000 rows per call.
+	Limit  int
+	Offset int
 }
 
 // quoteActionResponse is the {"data": Quote, "message": ...} shape returned by
@@ -83,6 +86,8 @@ func (s *QuotesService) List(ctx context.Context, params *QuoteListParams) ([]Qu
 			str("status", params.Status).
 			str("customer_id", params.CustomerID).
 			str("search", params.Search).
+			int("limit", params.Limit).
+			int("offset", params.Offset).
 			apply(path)
 	}
 	return getData[[]Quote](ctx, s.client, http.MethodGet, path, nil)

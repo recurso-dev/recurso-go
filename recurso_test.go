@@ -1158,3 +1158,48 @@ func TestCustomersCreditStatement(t *testing.T) {
 		t.Fatalf("statement = %+v", st)
 	}
 }
+
+func TestGiftsCancel(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"gift":{"id":"gift_1","status":"canceled"},"credit_note":{"id":"cn_1","amount":29900,"status":"issued"},"invoice_voided":false}}`)
+	res, err := ts.client.Gifts.Cancel(context.Background(), "gift_1")
+	if err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/gifts/gift_1/cancel")
+	if res.Gift.Status != "canceled" || res.CreditNote == nil || res.CreditNote.Amount != 29900 || res.InvoiceVoided {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestDisputesList(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"dsp_1","invoice_id":"inv_1","reason":"double charge","status":"open"}]}`)
+	disputes, err := ts.client.Disputes.List(context.Background(), &DisputeListParams{Status: "open", Limit: 50, Offset: 100})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/disputes")
+	if ts.query != "limit=50&offset=100&status=open" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if len(disputes) != 1 || disputes[0].Reason != "double charge" {
+		t.Errorf("disputes = %+v", disputes)
+	}
+}
+
+func TestDisputesResolve(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"status":"resolved"}`)
+	if err := ts.client.Disputes.Resolve(context.Background(), "dsp_1", &DisputeResolveParams{Note: "refunded"}); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/disputes/dsp_1/resolve")
+}
+
+func TestQuotesListPaging(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	if _, err := ts.client.Quotes.List(context.Background(), &QuoteListParams{Limit: 200, Offset: 400}); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "limit=200&offset=400" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
