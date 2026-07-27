@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -410,7 +411,9 @@ func TestEntitlementsSetForPlan(t *testing.T) {
 }
 
 func TestAnalyticsMRR(t *testing.T) {
-	ts := newTestServer(t, http.StatusOK, `{"currency":"USD","mrr":250000,"normalized_mrr":250000,"reporting_currency":"USD","fx":{"source":"live"}}`)
+	// The API wraps every response in {"data": ...}; the old client (and this
+	// test) decoded the raw body, silently returning zeros in production.
+	ts := newTestServer(t, http.StatusOK, `{"data":{"currency":"USD","mrr":250000,"normalized_mrr":250000,"reporting_currency":"USD","fx":{"source":"live"}}}`)
 	mrr, err := ts.client.Analytics.MRR(context.Background())
 	if err != nil {
 		t.Fatalf("MRR: %v", err)
@@ -1004,5 +1007,154 @@ func TestUsageListEvents(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Dimension != "api_calls" || events[0].Quantity != 10 {
 		t.Errorf("events = %+v", events)
+	}
+}
+
+// --- SDK catch-up 2026-07-27: collections, entities, analytics, alert edit ---
+
+func TestCollectionsQueue(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":[{"id":"inv_1","status":"past_due","amount_remaining":12500,"last_payment_error":"insufficient_funds","managed_by":"worker"}],"meta":{"page":1,"per_page":25,"total":1}}`)
+	items, err := ts.client.Collections.Queue(context.Background(), &CollectionsQueueParams{
+		Status: "past_due", ManagedBy: "worker", Page: 1, PerPage: 25,
+	})
+	if err != nil {
+		t.Fatalf("Queue: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/collections/queue")
+	for _, want := range []string{"status=past_due", "managed_by=worker", "per_page=25"} {
+		if !strings.Contains(ts.query, want) {
+			t.Errorf("query %q missing %q", ts.query, want)
+		}
+	}
+	if len(items) != 1 || items[0].AmountRemaining != 12500 || items[0].LastPaymentError != "insufficient_funds" {
+		t.Fatalf("items = %+v", items)
+	}
+}
+
+func TestCollectionsActions(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"status":"requeued"}}`)
+	if _, err := ts.client.Collections.RetryNow(context.Background(), "inv_1"); err != nil {
+		t.Fatalf("RetryNow: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/collections/invoices/inv_1/retry-now")
+
+	ts2 := newTestServer(t, 200, `{"data":{"dunning_paused":true}}`)
+	res, err := ts2.client.Collections.PauseDunning(context.Background(), "inv_1", true)
+	if err != nil {
+		t.Fatalf("PauseDunning: %v", err)
+	}
+	ts2.assertRequest(http.MethodPost, "/collections/invoices/inv_1/pause")
+	if ts2.bodyMap()["paused"] != true || !res.DunningPaused {
+		t.Fatalf("pause body/result wrong: %v %+v", ts2.bodyMap(), res)
+	}
+
+	ts3 := newTestServer(t, 200, `{"data":{"status":"uncollectible"}}`)
+	if _, err := ts3.client.Collections.MarkUncollectible(context.Background(), "inv_1"); err != nil {
+		t.Fatalf("MarkUncollectible: %v", err)
+	}
+	ts3.assertRequest(http.MethodPost, "/collections/invoices/inv_1/mark-uncollectible")
+}
+
+func TestCollectionsFunnel(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"reporting_currency":"USD","past_due":{"count":4,"amount":40000},"recovery_rate":0.75,"rate_window_days":90}}`)
+	f, err := ts.client.Collections.Funnel(context.Background())
+	if err != nil {
+		t.Fatalf("Funnel: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/analytics/collections/funnel")
+	if f.RecoveryRate != 0.75 || f.RateWindowDays != 90 || f.PastDue.Amount != 40000 {
+		t.Fatalf("funnel = %+v", f)
+	}
+}
+
+func TestEntitiesCRUDAndOverview(t *testing.T) {
+	ts := newTestServer(t, 201, `{"data":{"id":"ent_2","name":"Branch","invoice_prefix":"BR"}}`)
+	e, err := ts.client.Entities.Create(context.Background(), &EntityParams{Name: "Branch", InvoicePrefix: "BR", CountryCode: "US"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/entities")
+	if ts.bodyMap()["name"] != "Branch" || e.InvoicePrefix != "BR" {
+		t.Fatalf("create body/result wrong: %v %+v", ts.bodyMap(), e)
+	}
+
+	ts2 := newTestServer(t, 200, `{"data":{"reporting_currency":"USD","total_mrr":400000,"entities":[{"entity_id":"ent_1","mrr":300000,"is_primary":true}]}}`)
+	ov, err := ts2.client.Entities.Overview(context.Background())
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+	ts2.assertRequest(http.MethodGet, "/analytics/entities-overview")
+	if ov.TotalMRR != 400000 || len(ov.Entities) != 1 || ov.Entities[0].MRR != 300000 {
+		t.Fatalf("overview = %+v", ov)
+	}
+}
+
+// The MRR envelope fix: the API wraps in {"data": ...}; the old client decoded
+// the raw body and silently returned zeros.
+func TestAnalyticsMRRUnwrapsEnvelope(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"mrr":123400,"normalized_mrr":123400,"reporting_currency":"USD"}}`)
+	m, err := ts.client.Analytics.MRR(context.Background())
+	if err != nil {
+		t.Fatalf("MRR: %v", err)
+	}
+	if m.NormalizedMRR != 123400 || m.ReportingCurrency != "USD" {
+		t.Fatalf("MRR did not unwrap the data envelope: %+v", m)
+	}
+}
+
+func TestAnalyticsMRRByEntityAndAging(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"reporting_currency":"USD","total_mrr":101,"entities":[{"entity_id":"e1","normalized_mrr":51}]}}`)
+	b, err := ts.client.Analytics.MRRByEntity(context.Background())
+	if err != nil || b.TotalMRR != 101 {
+		t.Fatalf("MRRByEntity: %+v err=%v", b, err)
+	}
+	ts.assertRequest(http.MethodGet, "/analytics/mrr/by-entity")
+
+	ts2 := newTestServer(t, 200, `{"data":{"reporting_currency":"USD","total_outstanding":7000,"buckets":[{"label":"1-30","count":1,"amount":7000}]}}`)
+	rep, err := ts2.client.Analytics.InvoiceAging(context.Background(), "ent_1")
+	if err != nil || rep.TotalOutstanding != 7000 {
+		t.Fatalf("InvoiceAging: %+v err=%v", rep, err)
+	}
+	ts2.assertRequest(http.MethodGet, "/analytics/invoice-aging")
+	if !strings.Contains(ts2.query, "entity_id=ent_1") {
+		t.Errorf("query %q missing entity_id", ts2.query)
+	}
+}
+
+func TestUsageAlertsUpdate(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"id":"al_1","threshold_type":"quantity","threshold":5000}}`)
+	a, err := ts.client.UsageAlerts.Update(context.Background(), "al_1", &UsageAlertUpdateParams{
+		ThresholdType: "quantity", Threshold: 5000,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	ts.assertRequest(http.MethodPut, "/usage-alerts/al_1")
+	if ts.bodyMap()["threshold"] != float64(5000) || a.Threshold != 5000 {
+		t.Fatalf("update body/result wrong: %v %+v", ts.bodyMap(), a)
+	}
+}
+
+func TestWalletsClose(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"refunded":4000,"forfeited":1000}}`)
+	res, err := ts.client.Wallets.Close(context.Background(), "wal_1")
+	if err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/wallets/wal_1/close")
+	if res.Refunded != 4000 || res.Forfeited != 1000 {
+		t.Fatalf("close result = %+v", res)
+	}
+}
+
+func TestCustomersCreditStatement(t *testing.T) {
+	ts := newTestServer(t, 200, `{"data":{"customer_id":"cus_1","balances":[{"currency":"USD","balance":9000}],"summary":[{"currency":"USD","total_issued":10000,"total_applied":1000,"current_balance":9000}]}}`)
+	st, err := ts.client.Customers.CreditStatement(context.Background(), "cus_1")
+	if err != nil {
+		t.Fatalf("CreditStatement: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/customers/cus_1/credit-statement")
+	if len(st.Balances) != 1 || st.Balances[0].Balance != 9000 || st.Summary[0].CurrentBalance != 9000 {
+		t.Fatalf("statement = %+v", st)
 	}
 }

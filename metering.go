@@ -10,12 +10,12 @@ import (
 // BillableMetric is a tenant-defined meter over usage events. Code doubles
 // as the usage event dimension it aggregates and is unique per tenant.
 type BillableMetric struct {
-	ID              string    `json:"id"`
-	TenantID        string    `json:"tenant_id"`
-	Name            string    `json:"name"`
-	Code            string    `json:"code"`
-	AggregationType string    `json:"aggregation_type"` // count | sum | max | unique | latest | percentile | weighted_sum | custom (field_name holds the percentile 1-99)
-	FieldName       string    `json:"field_name,omitempty"`
+	ID              string `json:"id"`
+	TenantID        string `json:"tenant_id"`
+	Name            string `json:"name"`
+	Code            string `json:"code"`
+	AggregationType string `json:"aggregation_type"` // count | sum | max | unique | latest | percentile | weighted_sum | custom (field_name holds the percentile 1-99)
+	FieldName       string `json:"field_name,omitempty"`
 	// Expression is the per-event formula for the "custom" aggregation (e.g.
 	// "quantity * properties.multiplier"); its results are summed over the
 	// period. Set only for custom, empty otherwise.
