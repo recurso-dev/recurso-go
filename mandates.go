@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-// Mandate is a UPI Autopay mandate.
+// Mandate is a recurring-debit mandate: UPI Autopay for INR, SEPA/Bacs bank
+// debit (via GoCardless) for EUR/GBP.
 type Mandate struct {
 	ID                     string     `json:"id"`
 	TenantID               string     `json:"tenant_id"`
@@ -15,6 +16,7 @@ type Mandate struct {
 	SubscriptionID         string     `json:"subscription_id"`
 	MandateType            string     `json:"mandate_type"`
 	PaymentMethod          string     `json:"payment_method"`
+	Currency               string     `json:"currency"`
 	VPA                    string     `json:"vpa"`
 	RazorpayTokenID        string     `json:"razorpay_token_id"`
 	RazorpaySubscriptionID string     `json:"razorpay_subscription_id"`
@@ -32,12 +34,16 @@ type Mandate struct {
 	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
-// MandateCreateParams registers a UPI Autopay mandate. MaxAmount is in the
-// currency's smallest unit.
+// MandateCreateParams registers a recurring-debit mandate. MaxAmount is in
+// the currency's smallest unit. Currency picks the rail: empty or "INR" is
+// UPI Autopay (VPA required); an overridden currency such as "EUR" or "GBP"
+// is bank debit via GoCardless (the customer authorizes on the returned
+// AuthURL; no VPA).
 type MandateCreateParams struct {
 	CustomerID     string `json:"customer_id"`
 	SubscriptionID string `json:"subscription_id,omitempty"`
-	VPA            string `json:"vpa"`
+	Currency       string `json:"currency,omitempty"`
+	VPA            string `json:"vpa,omitempty"`
 	MaxAmount      int64  `json:"max_amount"`
 	Frequency      string `json:"frequency"`
 }
