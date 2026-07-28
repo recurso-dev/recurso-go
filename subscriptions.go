@@ -191,6 +191,11 @@ func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionLis
 	return getData[[]Subscription](ctx, s.client, http.MethodGet, path, nil)
 }
 
+// Get returns one subscription by id, scoped to the authenticated tenant.
+func (s *SubscriptionsService) Get(ctx context.Context, id string) (*Subscription, error) {
+	return getData[*Subscription](ctx, s.client, http.MethodGet, "/subscriptions/"+id, nil)
+}
+
 // Update changes the subscription's plan.
 func (s *SubscriptionsService) Update(ctx context.Context, id string, params *SubscriptionUpdateParams) (*Subscription, error) {
 	var out Subscription
