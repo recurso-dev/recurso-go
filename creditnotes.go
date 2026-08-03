@@ -8,16 +8,26 @@ import (
 
 // CreditNote is a customer credit.
 type CreditNote struct {
-	ID         string    `json:"id"`
-	TenantID   string    `json:"tenant_id"`
-	CustomerID string    `json:"customer_id"`
-	InvoiceID  string    `json:"invoice_id"`
-	Reference  string    `json:"reference"`
-	Amount     int64     `json:"amount"`
-	Balance    int64     `json:"balance"`
-	Currency   string    `json:"currency"`
-	Status     string    `json:"status"`
-	Reason     string    `json:"reason"`
+	ID         string `json:"id"`
+	TenantID   string `json:"tenant_id"`
+	CustomerID string `json:"customer_id"`
+	InvoiceID  string `json:"invoice_id"`
+	Reference  string `json:"reference"`
+	Amount     int64  `json:"amount"`
+	Balance    int64  `json:"balance"`
+	Currency   string `json:"currency"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason"`
+	// Tax breakdown (present when the note recorded one at creation; zero /
+	// empty on legacy rows and standalone goodwill credits). Amount is gross;
+	// Subtotal is the taxable value. See the credit-note document (CDN).
+	Subtotal   int64     `json:"subtotal,omitempty"`
+	TaxAmount  int64     `json:"tax_amount,omitempty"`
+	IGSTAmount int64     `json:"igst_amount,omitempty"`
+	CGSTAmount int64     `json:"cgst_amount,omitempty"`
+	SGSTAmount int64     `json:"sgst_amount,omitempty"`
+	TaxType    string    `json:"tax_type,omitempty"`
+	HSNCode    string    `json:"hsn_code,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	Customer   *Customer `json:"customer,omitempty"`
