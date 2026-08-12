@@ -94,8 +94,13 @@ type EInvoiceCancelParams struct {
 
 // InvoiceListParams filters the invoice list.
 type InvoiceListParams struct {
-	Limit int
-	Page  int
+	// CustomerID filters to one customer's invoices (tenant-scoped).
+	CustomerID string
+	// SubscriptionID filters to one subscription's invoices. Ignored by the
+	// API when CustomerID is also set.
+	SubscriptionID string
+	Limit          int
+	Page           int
 }
 
 // InvoicesService groups the invoice endpoints.
@@ -105,9 +110,20 @@ type InvoicesService struct{ client *Client }
 func (s *InvoicesService) List(ctx context.Context, params *InvoiceListParams) ([]Invoice, error) {
 	path := "/invoices"
 	if params != nil {
-		path = newQuery().int("limit", params.Limit).int("page", params.Page).apply(path)
+		path = newQuery().
+			str("customer_id", params.CustomerID).
+			str("subscription_id", params.SubscriptionID).
+			int("limit", params.Limit).
+			int("page", params.Page).
+			apply(path)
 	}
 	return getData[[]Invoice](ctx, s.client, http.MethodGet, path, nil)
+}
+
+// Get returns one invoice by id, scoped to the authenticated tenant. A
+// foreign or missing invoice is a flat 404.
+func (s *InvoicesService) Get(ctx context.Context, id string) (*Invoice, error) {
+	return getData[*Invoice](ctx, s.client, http.MethodGet, "/invoices/"+id, nil)
 }
 
 // PDFURL returns the public URL for an invoice's printable document. It does

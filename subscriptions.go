@@ -53,6 +53,8 @@ type SubscriptionListParams struct {
 	Q      string
 	// PlanID filters to one plan's subscriptions.
 	PlanID string
+	// CustomerID filters to one customer's subscriptions.
+	CustomerID string
 	// StartedAfter keeps subscriptions whose current period started at or
 	// after this instant. The zero value means no lower bound.
 	StartedAfter time.Time
@@ -190,6 +192,7 @@ func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionLis
 			str("status", params.Status).
 			str("q", params.Q).
 			str("plan_id", params.PlanID).
+			str("customer_id", params.CustomerID).
 			int("limit", params.Limit).
 			int("page", params.Page)
 		if !params.StartedAfter.IsZero() {

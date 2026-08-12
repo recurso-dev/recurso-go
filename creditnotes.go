@@ -75,3 +75,9 @@ func (s *CreditNotesService) List(ctx context.Context, params *CreditNoteListPar
 	}
 	return getData[[]CreditNote](ctx, s.client, http.MethodGet, path, nil)
 }
+
+// Get returns one credit note by id, scoped to the authenticated tenant. A
+// foreign or missing credit note is a flat 404.
+func (s *CreditNotesService) Get(ctx context.Context, id string) (*CreditNote, error) {
+	return getData[*CreditNote](ctx, s.client, http.MethodGet, "/credit-notes/"+id, nil)
+}
