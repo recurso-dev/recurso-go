@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // testServer spins up a mock HTTP server, points a Client at it, and records
@@ -119,6 +120,43 @@ func TestPlansList(t *testing.T) {
 	}
 	if len(plans) != 2 || plans[1].Name != "Team" {
 		t.Errorf("plans = %+v", plans)
+	}
+}
+
+func TestPlansListCurrencyIntervalFilters(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	_, err := ts.client.Plans.List(context.Background(), &PlanListParams{Currency: "INR", IntervalUnit: "month"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "currency=INR&interval_unit=month" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
+
+func TestSubscriptionsListPlanAndDateFilters(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	after := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	_, err := ts.client.Subscriptions.List(context.Background(), &SubscriptionListParams{
+		PlanID:       "plan_1",
+		StartedAfter: after,
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "plan_id=plan_1&started_after=2026-08-01T00%3A00%3A00Z" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
+
+func TestEventsListTypeFilter(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	_, err := ts.client.Events.List(context.Background(), &EventListParams{Type: "invoice.paid", Limit: 5})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "limit=5&type=invoice.paid" {
+		t.Errorf("query = %q", ts.query)
 	}
 }
 
