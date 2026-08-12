@@ -24,8 +24,11 @@ type RedeliverResult struct {
 	DeliveriesQueued int    `json:"deliveries_queued"`
 }
 
-// EventListParams paginates the event feed.
+// EventListParams paginates and filters the event feed.
 type EventListParams struct {
+	// Type filters to one event type (e.g. "invoice.paid"). Empty means all
+	// types; Types() lists the catalog.
+	Type   string
 	Limit  int
 	Offset int
 }
@@ -37,7 +40,7 @@ type EventsService struct{ client *Client }
 func (s *EventsService) List(ctx context.Context, params *EventListParams) ([]Event, error) {
 	path := "/events"
 	if params != nil {
-		q := newQuery().int("limit", params.Limit)
+		q := newQuery().str("type", params.Type).int("limit", params.Limit)
 		if params.Offset != 0 {
 			q.int("offset", params.Offset)
 		}

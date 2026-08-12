@@ -56,9 +56,13 @@ type PlanUpdateParams struct {
 
 // PlanListParams filters the plan list.
 type PlanListParams struct {
-	Q     string
-	Limit int
-	Page  int
+	Q string
+	// Currency keeps plans that have a price in this currency (e.g. "USD").
+	Currency string
+	// IntervalUnit filters by billing interval unit (e.g. "month", "year").
+	IntervalUnit string
+	Limit        int
+	Page         int
 }
 
 // PlansService groups the plan endpoints.
@@ -96,7 +100,13 @@ func (s *PlansService) Update(ctx context.Context, id string, params *PlanUpdate
 func (s *PlansService) List(ctx context.Context, params *PlanListParams) ([]Plan, error) {
 	path := "/plans"
 	if params != nil {
-		path = newQuery().str("q", params.Q).int("limit", params.Limit).int("page", params.Page).apply(path)
+		path = newQuery().
+			str("q", params.Q).
+			str("currency", params.Currency).
+			str("interval_unit", params.IntervalUnit).
+			int("limit", params.Limit).
+			int("page", params.Page).
+			apply(path)
 	}
 	return getData[[]Plan](ctx, s.client, http.MethodGet, path, nil)
 }

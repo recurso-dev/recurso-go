@@ -51,8 +51,13 @@ type SubscriptionCreateParams struct {
 type SubscriptionListParams struct {
 	Status string
 	Q      string
-	Limit  int
-	Page   int
+	// PlanID filters to one plan's subscriptions.
+	PlanID string
+	// StartedAfter keeps subscriptions whose current period started at or
+	// after this instant. The zero value means no lower bound.
+	StartedAfter time.Time
+	Limit        int
+	Page         int
 }
 
 // SubscriptionUpdateParams changes a subscription's plan (upgrade/downgrade).
@@ -181,12 +186,16 @@ func (s *SubscriptionsService) Create(ctx context.Context, params *SubscriptionC
 func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionListParams) ([]Subscription, error) {
 	path := "/subscriptions"
 	if params != nil {
-		path = newQuery().
+		q := newQuery().
 			str("status", params.Status).
 			str("q", params.Q).
+			str("plan_id", params.PlanID).
 			int("limit", params.Limit).
-			int("page", params.Page).
-			apply(path)
+			int("page", params.Page)
+		if !params.StartedAfter.IsZero() {
+			q.str("started_after", params.StartedAfter.UTC().Format(time.RFC3339))
+		}
+		path = q.apply(path)
 	}
 	return getData[[]Subscription](ctx, s.client, http.MethodGet, path, nil)
 }
