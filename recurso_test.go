@@ -160,6 +160,61 @@ func TestEventsListTypeFilter(t *testing.T) {
 	}
 }
 
+func TestInvoicesGet(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"inv_1","status":"paid"}}`)
+	inv, err := ts.client.Invoices.Get(context.Background(), "inv_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if inv.ID != "inv_1" || ts.path != "/invoices/inv_1" {
+		t.Errorf("inv = %+v path = %q", inv, ts.path)
+	}
+}
+
+func TestInvoicesListScopedFilters(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	_, err := ts.client.Invoices.List(context.Background(), &InvoiceListParams{CustomerID: "cus_1", SubscriptionID: "sub_1"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "customer_id=cus_1&subscription_id=sub_1" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
+
+func TestCreditNotesGet(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"cn_1","status":"issued"}}`)
+	cn, err := ts.client.CreditNotes.Get(context.Background(), "cn_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if cn.ID != "cn_1" || ts.path != "/credit-notes/cn_1" {
+		t.Errorf("cn = %+v path = %q", cn, ts.path)
+	}
+}
+
+func TestSubscriptionsListCustomerFilter(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	_, err := ts.client.Subscriptions.List(context.Background(), &SubscriptionListParams{CustomerID: "cus_1"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "customer_id=cus_1" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
+
+func TestEventsListObjectFilter(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	_, err := ts.client.Events.List(context.Background(), &EventListParams{ObjectID: "inv_1"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "object_id=inv_1" {
+		t.Errorf("query = %q", ts.query)
+	}
+}
+
 func TestCustomersCreate(t *testing.T) {
 	ts := newTestServer(t, http.StatusCreated, `{"id":"cus_1","email":"jane@example.com","name":"Jane"}`)
 	cus, err := ts.client.Customers.Create(context.Background(), &CustomerCreateParams{Email: "jane@example.com", Name: "Jane", Country: "US"})

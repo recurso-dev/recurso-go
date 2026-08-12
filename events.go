@@ -28,9 +28,12 @@ type RedeliverResult struct {
 type EventListParams struct {
 	// Type filters to one event type (e.g. "invoice.paid"). Empty means all
 	// types; Types() lists the catalog.
-	Type   string
-	Limit  int
-	Offset int
+	Type string
+	// ObjectID filters to one object's events — the per-object timeline.
+	// Takes precedence over Type.
+	ObjectID string
+	Limit    int
+	Offset   int
 }
 
 // EventsService groups the event-feed endpoints.
@@ -40,7 +43,7 @@ type EventsService struct{ client *Client }
 func (s *EventsService) List(ctx context.Context, params *EventListParams) ([]Event, error) {
 	path := "/events"
 	if params != nil {
-		q := newQuery().str("type", params.Type).int("limit", params.Limit)
+		q := newQuery().str("type", params.Type).str("object_id", params.ObjectID).int("limit", params.Limit)
 		if params.Offset != 0 {
 			q.int("offset", params.Offset)
 		}
