@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -56,7 +57,7 @@ func (s *AccountingService) Connections(ctx context.Context) ([]AccountingConnec
 // ("netsuite" or "tally") outside the browser OAuth flow. params may be nil
 // for Tally.
 func (s *AccountingService) ConnectToken(ctx context.Context, provider string, params *AccountingConnectTokenParams) (*AccountingConnection, error) {
-	out, err := getData[AccountingConnection](ctx, s.client, http.MethodPost, "/accounting/connect-token/"+provider, params)
+	out, err := getData[AccountingConnection](ctx, s.client, http.MethodPost, fmt.Sprintf("/accounting/connect-token/%s", provider), params)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +67,7 @@ func (s *AccountingService) ConnectToken(ctx context.Context, provider string, p
 // Disconnect removes an accounting connection.
 func (s *AccountingService) Disconnect(ctx context.Context, id string) (*StatusResponse, error) {
 	var out StatusResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/accounting/connections/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/accounting/connections/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -84,4 +85,31 @@ func (s *AccountingService) Sync(ctx context.Context) (*StatusResponse, error) {
 // SyncStatus returns the 50 most recent per-entity sync results.
 func (s *AccountingService) SyncStatus(ctx context.Context) ([]AccountingSyncLog, error) {
 	return getData[[]AccountingSyncLog](ctx, s.client, http.MethodGet, "/accounting/sync/status", nil)
+}
+
+// AccountingConnectResult is the provider authorization URL to send the user
+// to.
+type AccountingConnectResult struct {
+	AuthURL string `json:"auth_url"`
+}
+
+// Connect starts the OAuth flow for a browser-authorized provider (e.g.
+// "quickbooks", "xero") and returns the URL to redirect the user to. The
+// provider sends the user back to CallbackURL.
+func (s *AccountingService) Connect(ctx context.Context, provider string) (*AccountingConnectResult, error) {
+	var out AccountingConnectResult
+	if err := s.client.do(ctx, http.MethodPost, fmt.Sprintf("/accounting/connect/%s", provider), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CallbackURL returns the OAuth callback URL the provider redirects to after
+// authorization, carrying its code and the HMAC-signed state issued by
+// Connect (realmID is the QuickBooks company id; empty for other providers).
+// The API exchanges the code and 302-redirects to the dashboard, so this is
+// a URL builder rather than a request.
+func (s *AccountingService) CallbackURL(provider, code, state, realmID string) string {
+	path := newQuery().str("code", code).str("state", state).str("realmId", realmID).apply(fmt.Sprintf("/accounting/callback/%s", provider))
+	return s.client.baseURL + path
 }

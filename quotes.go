@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -95,7 +96,7 @@ func (s *QuotesService) List(ctx context.Context, params *QuoteListParams) ([]Qu
 
 // Get retrieves a quote by ID.
 func (s *QuotesService) Get(ctx context.Context, id string) (*Quote, error) {
-	out, err := getData[Quote](ctx, s.client, http.MethodGet, "/quotes/"+id, nil)
+	out, err := getData[Quote](ctx, s.client, http.MethodGet, fmt.Sprintf("/quotes/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +105,7 @@ func (s *QuotesService) Get(ctx context.Context, id string) (*Quote, error) {
 
 // Update updates a draft quote.
 func (s *QuotesService) Update(ctx context.Context, id string, params *QuoteCreateParams) (*Quote, error) {
-	out, err := getData[Quote](ctx, s.client, http.MethodPut, "/quotes/"+id, params)
+	out, err := getData[Quote](ctx, s.client, http.MethodPut, fmt.Sprintf("/quotes/%s", id), params)
 	if err != nil {
 		return nil, err
 	}
@@ -114,15 +115,15 @@ func (s *QuotesService) Update(ctx context.Context, id string, params *QuoteCrea
 // Delete deletes a draft quote.
 func (s *QuotesService) Delete(ctx context.Context, id string) (*MessageResponse, error) {
 	var out MessageResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/quotes/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/quotes/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (s *QuotesService) action(ctx context.Context, id, action string) (*Quote, error) {
+func (s *QuotesService) action(ctx context.Context, path string) (*Quote, error) {
 	var out quoteActionResponse
-	if err := s.client.do(ctx, http.MethodPost, "/quotes/"+id+"/"+action, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPost, path, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out.Data, nil
@@ -130,22 +131,22 @@ func (s *QuotesService) action(ctx context.Context, id, action string) (*Quote, 
 
 // Send transitions a quote from draft to sent.
 func (s *QuotesService) Send(ctx context.Context, id string) (*Quote, error) {
-	return s.action(ctx, id, "send")
+	return s.action(ctx, fmt.Sprintf("/quotes/%s/send", id))
 }
 
 // Accept marks a quote as accepted.
 func (s *QuotesService) Accept(ctx context.Context, id string) (*Quote, error) {
-	return s.action(ctx, id, "accept")
+	return s.action(ctx, fmt.Sprintf("/quotes/%s/accept", id))
 }
 
 // Decline marks a quote as declined.
 func (s *QuotesService) Decline(ctx context.Context, id string) (*Quote, error) {
-	return s.action(ctx, id, "decline")
+	return s.action(ctx, fmt.Sprintf("/quotes/%s/decline", id))
 }
 
 // Convert converts an accepted quote into an invoice.
 func (s *QuotesService) Convert(ctx context.Context, id string) (*Invoice, error) {
-	out, err := getData[Invoice](ctx, s.client, http.MethodPost, "/quotes/"+id+"/convert", nil)
+	out, err := getData[Invoice](ctx, s.client, http.MethodPost, fmt.Sprintf("/quotes/%s/convert", id), nil)
 	if err != nil {
 		return nil, err
 	}

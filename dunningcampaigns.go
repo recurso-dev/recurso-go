@@ -98,7 +98,7 @@ func (s *DunningCampaignsService) List(ctx context.Context) ([]DunningCampaign, 
 // Get retrieves a dunning campaign with its steps.
 func (s *DunningCampaignsService) Get(ctx context.Context, id string) (*DunningCampaign, error) {
 	var out DunningCampaign
-	if err := s.client.do(ctx, http.MethodGet, "/dunning-campaigns/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodGet, fmt.Sprintf("/dunning-campaigns/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -107,7 +107,7 @@ func (s *DunningCampaignsService) Get(ctx context.Context, id string) (*DunningC
 // Update updates a dunning campaign.
 func (s *DunningCampaignsService) Update(ctx context.Context, id string, params *DunningCampaignUpdateParams) (*DunningCampaign, error) {
 	var out DunningCampaign
-	if err := s.client.do(ctx, http.MethodPut, "/dunning-campaigns/"+id, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/dunning-campaigns/%s", id), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -125,7 +125,7 @@ func (s *DunningCampaignsService) AddStep(ctx context.Context, id string, params
 // UpdateStep updates a dunning campaign step.
 func (s *DunningCampaignsService) UpdateStep(ctx context.Context, stepID string, params *DunningStepUpdateParams) (*DunningCampaignStep, error) {
 	var out DunningCampaignStep
-	if err := s.client.do(ctx, http.MethodPut, "/dunning-campaigns/steps/"+stepID, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/dunning-campaigns/steps/%s", stepID), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -134,7 +134,7 @@ func (s *DunningCampaignsService) UpdateStep(ctx context.Context, stepID string,
 // DeleteStep deletes a dunning campaign step.
 func (s *DunningCampaignsService) DeleteStep(ctx context.Context, stepID string) (*StatusResponse, error) {
 	var out StatusResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/dunning-campaigns/steps/"+stepID, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/dunning-campaigns/steps/%s", stepID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

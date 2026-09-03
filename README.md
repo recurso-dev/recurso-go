@@ -1,6 +1,6 @@
 # recurso-go
 
-Official Go SDK for the [Recurso](https://github.com/recurso-dev/recurso) billing API — 22 resources / 90 methods covering plans, customers, the full subscription lifecycle (pause/resume/cancel, add-ons, plan-change preview, minimum commitments), invoices, usage-based billing (billable metrics, plan charges, prepaid wallets, usage alerts, batch ingestion, audit trail), coupons, quotes, entitlements, webhooks (deliveries and redelivery), events, credit notes, gifts, referrals, mandates, ledger, analytics, developer keys, and the tenant account.
+Official Go SDK for the [Recurso](https://github.com/recurso-dev/recurso) billing API — 45 resources / 276 methods covering the full catalog: plans, customers, the subscription lifecycle (pause/resume/cancel, add-ons, plan-change and cancel previews, minimum commitments, financial summaries), invoices (drill-downs into journal entries, payment attempts, status history, printable documents, EU e-invoicing), usage-based billing (billable metrics, plan charges and simulation, prepaid wallets, usage alerts, batch ingestion, audit trail), coupons, quotes, entitlements, webhooks, events, credit notes (approval workflow, journal entries), gifts, referrals, mandates, the double-entry ledger (trial balance, deferred-revenue rollforward, CSV export), finance (reconciliation, month-end close pack, revenue recognition), analytics (MRR waterfall, unit economics, revenue by plan/geography, dunning insights, natural-language questions), Indian GST returns, tax/e-invoicing/branding settings, BYO gateway and integration connections, migrations from Stripe/RevenueCat/Chargebee, team members, SSO, and the tenant account.
 
 Standard library only — no third-party dependencies. Requires Go 1.22+.
 
@@ -89,21 +89,68 @@ client := recurso.NewClient(
 ```
 
 - `WithBaseURL` targets a self-hosted or staging deployment. The base URL
-  includes the `/v1` version prefix.
+  includes the `/v1` version prefix (`client.System.Version` strips it to
+  reach the unversioned `/version` endpoint).
 - `WithHTTPClient` supplies a custom `*http.Client` for timeouts, proxies, or
   instrumentation.
 
 ## Resource layout
 
-Every endpoint hangs off a resource field on the `Client`, e.g.
-`client.Plans`, `client.Customers`, `client.Subscriptions`, `client.Invoices`,
-`client.Usage`, `client.Coupons`, `client.Quotes`, `client.Entitlements`,
-`client.Webhooks`, `client.Events`, `client.CreditNotes`, `client.Gifts`,
-`client.Referrals`, `client.Mandates`, `client.Ledger`, `client.Analytics`,
-`client.Developer`, `client.Account`, `client.Organizations`,
-`client.Accounting`, `client.OfflinePayments`, `client.VirtualAccounts`,
-`client.Churn`, `client.CancelFlows`, and `client.DunningCampaigns`. Every
-method takes a `context.Context` first and returns `(T, error)`.
+Every endpoint hangs off a resource field on the `Client`. Every method
+takes a `context.Context` first and returns `(T, error)`; printable
+documents and CSV exports return `[]byte`.
+
+| Resource | Field | Covers |
+|---|---|---|
+| Account | `client.Account` | Tenant profile |
+| Accounting | `client.Accounting` | QuickBooks/Xero/NetSuite/Tally connections, OAuth start, sync |
+| Analytics | `client.Analytics` | MRR (by entity, waterfall), invoice aging, unit economics, revenue by plan/geography, dunning insights, usage stats, natural-language questions |
+| Audit logs | `client.AuditLogs` | Audit trail |
+| Auth | `client.Auth` | TOTP MFA enrollment and login sessions (session-cookie flows) |
+| Billable metrics | `client.BillableMetrics` | Meters, and the plans priced on them |
+| Billing | `client.Billing` | The tenant's own managed-cloud plan and trial status |
+| Cancel flows | `client.CancelFlows` | Retention flows, steps, sessions, stats |
+| Churn | `client.Churn` | High-risk customers and alerts |
+| Collections | `client.Collections` | Collections queue, funnel, failures, per-invoice actions |
+| Consents | `client.Consents` | Record and revoke customer consents |
+| Coupons | `client.Coupons` | Discount codes |
+| Credit notes | `client.CreditNotes` | Issue, approve/reject/void, journal entries, printable document |
+| Customers | `client.Customers` | CRUD, payment method, churn score, consents, credit statement, financial summary |
+| Developer | `client.Developer` | API keys (create, list, revoke) |
+| Disputes | `client.Disputes` | Invoice disputes |
+| Dunning campaigns | `client.DunningCampaigns` | Campaigns and steps |
+| Entities | `client.Entities` | Legal entities (Multi-Entity Books) |
+| Entitlements | `client.Entitlements` | Plan and customer entitlements, checks |
+| Events | `client.Events` | Event log, types, deliveries, redelivery |
+| Finance | `client.Finance` | Reconciliation runs, month-end close pack, revenue recognition |
+| Gateway connections | `client.GatewayConnections` | BYO Stripe/Razorpay connections and webhook secrets |
+| Gifts | `client.Gifts` | Gift subscriptions |
+| Imports | `client.Imports` | Stripe/RevenueCat/Chargebee preview, commit, compare; stored compare reports |
+| India | `client.India` | GSTR-1 and GSTR-3B returns |
+| Integration connections | `client.IntegrationConnections` | BYO tax/CRM/storage integrations, CRM sync |
+| Invoices | `client.Invoices` | List/get, journal entries, payment attempts, status history, documents, send, e-invoicing (IRN and EU), payment wall |
+| Ledger | `client.Ledger` | Accounts, entries, transactions, trial balance, deferred rollforward, CSV export |
+| Mandates | `client.Mandates` | UPI Autopay / bank-debit mandates |
+| Offline payments | `client.OfflinePayments` | Record and list offline payments |
+| Organizations | `client.Organizations` | Multi-tenant organizations |
+| Payment attempts | `client.PaymentAttempts` | Tenant-wide payments log |
+| Plans | `client.Plans` | Catalog plans, usage charges, charge simulation |
+| Quotes | `client.Quotes` | Quote-to-invoice lifecycle |
+| Referrals | `client.Referrals` | Referral codes and qualification |
+| Settings | `client.Settings` | GST, IRP, US sales tax (registrations, nexus, liability), EU e-invoicing, W-9, invoice branding, MCP |
+| SSO | `client.SSO` | SAML SSO connection |
+| Subscriptions | `client.Subscriptions` | Lifecycle, add-ons, charges, previews, usage, history, financial summary, consent, cancellation reasons |
+| System | `client.System` | API build version |
+| Usage | `client.Usage` | Usage events, batch ingestion, queries, dimensions |
+| Usage alerts | `client.UsageAlerts` | Threshold alerts |
+| Users | `client.Users` | Team members and invitations |
+| Virtual accounts | `client.VirtualAccounts` | Bank virtual accounts |
+| Wallets | `client.Wallets` | Prepaid wallets, top-ups, auto-recharge |
+| Webhooks | `client.Webhooks` | Endpoints, status, deliveries |
+
+Not covered, by design: browser session flows (`/auth/*`), the customer
+portal (`/portal/*`), hosted checkout (`/checkout/*`), and inbound gateway
+webhooks (`/webhooks/*`).
 
 ## Error handling
 
@@ -127,6 +174,20 @@ resource, plus the error path. Run it with:
 
 ```bash
 go test ./...
+```
+
+CI (`.github/workflows/ci.yml`) runs `go build`, `go vet`, a `gofmt -l`
+check, and `go test -race` on Go 1.22 and the current stable release.
+
+## Releasing
+
+Releases are git tags of the form `vX.Y.Z` on `main`; the Go module proxy
+picks them up directly. Tags go up to `v1.6.0` today, so the next release is
+`v1.7.0` (see `CHANGELOG.md`):
+
+```bash
+git tag -a v1.7.0 -m "v1.7.0"
+git push origin v1.7.0
 ```
 
 ## License

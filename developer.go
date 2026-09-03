@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -31,6 +32,16 @@ func (s *DeveloperService) ListKeys(ctx context.Context) ([]APIKey, error) {
 func (s *DeveloperService) CreateKey(ctx context.Context) (*APIKey, error) {
 	var out APIKey
 	if err := s.client.do(ctx, http.MethodPost, "/developer/keys", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RevokeKey revokes an API key. Requests signed with it fail from the next
+// call onward.
+func (s *DeveloperService) RevokeKey(ctx context.Context, id string) (*StatusResponse, error) {
+	var out StatusResponse
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/developer/keys/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

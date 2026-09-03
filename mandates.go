@@ -74,7 +74,7 @@ func (s *MandatesService) List(ctx context.Context) ([]Mandate, error) {
 
 // Get retrieves a mandate by ID.
 func (s *MandatesService) Get(ctx context.Context, id string) (*Mandate, error) {
-	out, err := getData[Mandate](ctx, s.client, http.MethodGet, "/mandates/"+id, nil)
+	out, err := getData[Mandate](ctx, s.client, http.MethodGet, fmt.Sprintf("/mandates/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}

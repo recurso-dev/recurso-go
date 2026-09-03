@@ -165,7 +165,7 @@ func (s *CustomersService) List(ctx context.Context, params *CustomerListParams)
 
 // Get retrieves a customer by ID.
 func (s *CustomersService) Get(ctx context.Context, id string) (*Customer, error) {
-	out, err := getData[Customer](ctx, s.client, http.MethodGet, "/customers/"+id, nil)
+	out, err := getData[Customer](ctx, s.client, http.MethodGet, fmt.Sprintf("/customers/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +175,7 @@ func (s *CustomersService) Get(ctx context.Context, id string) (*Customer, error
 // Update partially updates a customer. Set Active in params to archive or
 // restore it.
 func (s *CustomersService) Update(ctx context.Context, id string, params *CustomerUpdateParams) (*Customer, error) {
-	out, err := getData[Customer](ctx, s.client, http.MethodPut, "/customers/"+id, params)
+	out, err := getData[Customer](ctx, s.client, http.MethodPut, fmt.Sprintf("/customers/%s", id), params)
 	if err != nil {
 		return nil, err
 	}
@@ -245,4 +245,28 @@ type CreditStatement struct {
 // CreditStatement returns the customer's account-credit statement.
 func (s *CustomersService) CreditStatement(ctx context.Context, id string) (*CreditStatement, error) {
 	return getData[*CreditStatement](ctx, s.client, http.MethodGet, fmt.Sprintf("/customers/%s/credit-statement", id), nil)
+}
+
+// CurrencyFinancials is a customer's or subscription's money position in one
+// currency (minor units): what is outstanding, how much of that is past due,
+// and lifetime billed/paid totals.
+type CurrencyFinancials struct {
+	Currency     string `json:"currency"`
+	Outstanding  int64  `json:"outstanding"`
+	PastDue      int64  `json:"past_due"`
+	PastDueCount int    `json:"past_due_count"`
+	Billed       int64  `json:"billed"`
+	Paid         int64  `json:"paid"`
+}
+
+// CustomerFinancialSummary is a customer's per-currency money position.
+type CustomerFinancialSummary struct {
+	CustomerID string               `json:"customer_id"`
+	Currencies []CurrencyFinancials `json:"currencies"`
+}
+
+// FinancialSummary returns the customer's outstanding, past-due, billed, and
+// paid totals per currency.
+func (s *CustomersService) FinancialSummary(ctx context.Context, id string) (*CustomerFinancialSummary, error) {
+	return getData[*CustomerFinancialSummary](ctx, s.client, http.MethodGet, fmt.Sprintf("/customers/%s/financial-summary", id), nil)
 }

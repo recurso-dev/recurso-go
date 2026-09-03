@@ -84,11 +84,22 @@ type Charge struct {
 	Metric       *BillableMetric `json:"metric,omitempty"`
 }
 
+// ChargeFilter prices one value of a charge's FilterKey property with its own
+// amounts (e.g. per-region rates).
+type ChargeFilter struct {
+	Value   string                   `json:"value"`
+	Amounts map[string]ChargeAmounts `json:"amounts"`
+}
+
 // ChargeParams is one charge in a plan's charge set (PUT replace semantics).
 type ChargeParams struct {
 	MetricID    string                   `json:"metric_id"`
 	ChargeModel string                   `json:"charge_model"`
 	Amounts     map[string]ChargeAmounts `json:"amounts"`
+	// FilterKey names the usage-event property whose values Filters price
+	// separately; both are optional.
+	FilterKey string         `json:"filter_key,omitempty"`
+	Filters   []ChargeFilter `json:"filters,omitempty"`
 	// PayInAdvance: non-cumulative models only (per_unit/percentage/dynamic).
 	PayInAdvance bool   `json:"pay_in_advance,omitempty"`
 	HSNCode      string `json:"hsn_code,omitempty"`
@@ -160,4 +171,75 @@ func (s *PlansService) GetCharges(ctx context.Context, planID string) ([]Charge,
 // rate to if invoiced now.
 func (s *SubscriptionsService) UsageAmount(ctx context.Context, id string) (*UsageAmount, error) {
 	return getData[*UsageAmount](ctx, s.client, http.MethodGet, fmt.Sprintf("/subscriptions/%s/usage-amount", id), nil)
+}
+
+// MetricCharge is one plan charge priced on a billable metric (reverse
+// lookup from the meter).
+type MetricCharge struct {
+	ChargeID     string `json:"charge_id"`
+	PlanID       string `json:"plan_id"`
+	PlanName     string `json:"plan_name"`
+	PlanCode     string `json:"plan_code"`
+	PlanActive   bool   `json:"plan_active"`
+	ChargeModel  string `json:"charge_model"`
+	PayInAdvance bool   `json:"pay_in_advance"`
+}
+
+// Charges lists every plan charge priced on the metric.
+func (s *BillableMetricsService) Charges(ctx context.Context, id string) ([]MetricCharge, error) {
+	return getData[[]MetricCharge](ctx, s.client, http.MethodGet, fmt.Sprintf("/billable-metrics/%s/charges", id), nil)
+}
+
+// SimulateUsage is a hypothetical usage quantity for one metric.
+type SimulateUsage struct {
+	MetricID string `json:"metric_id"`
+	Quantity int64  `json:"quantity"`
+}
+
+// SimulateChargesParams is a proposed charge set plus the usage to rate it
+// against. SubscriptionID, when set, uses that subscription's current-period
+// usage instead of Usage.
+type SimulateChargesParams struct {
+	Currency       string          `json:"currency,omitempty"`
+	SubscriptionID string          `json:"subscription_id,omitempty"`
+	Charges        []ChargeParams  `json:"charges"`
+	Usage          []SimulateUsage `json:"usage,omitempty"`
+}
+
+// SimulatedCharge is one charge's rated amount in a simulation (minor
+// units).
+type SimulatedCharge struct {
+	MetricID    string `json:"metric_id"`
+	MetricCode  string `json:"metric_code"`
+	MetricName  string `json:"metric_name"`
+	ChargeModel string `json:"charge_model"`
+	Quantity    int64  `json:"quantity"`
+	Amount      int64  `json:"amount"`
+}
+
+// SimulatedGLLine is one line of the journal entry the simulated invoice
+// would post (minor units).
+type SimulatedGLLine struct {
+	AccountCode int    `json:"account_code"`
+	AccountName string `json:"account_name"`
+	Debit       int64  `json:"debit"`
+	Credit      int64  `json:"credit"`
+}
+
+// ChargeSimulation is the read-only result of rating a proposed charge set:
+// per-charge amounts, the subtotal, and the GL preview. Nothing is
+// persisted.
+type ChargeSimulation struct {
+	PlanID    string            `json:"plan_id"`
+	Currency  string            `json:"currency"`
+	Charges   []SimulatedCharge `json:"charges"`
+	Subtotal  int64             `json:"subtotal"`
+	GLPreview []SimulatedGLLine `json:"gl_preview"`
+	Balanced  bool              `json:"balanced"`
+	Note      string            `json:"note"`
+}
+
+// SimulateCharges rates a proposed charge set for a plan without saving it.
+func (s *PlansService) SimulateCharges(ctx context.Context, planID string, params *SimulateChargesParams) (*ChargeSimulation, error) {
+	return getData[*ChargeSimulation](ctx, s.client, http.MethodPost, fmt.Sprintf("/plans/%s/simulate-charges", planID), params)
 }

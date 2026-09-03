@@ -153,7 +153,7 @@ func (s *CancelFlowsService) List(ctx context.Context) ([]CancelFlow, error) {
 // Get retrieves a cancel flow with its steps.
 func (s *CancelFlowsService) Get(ctx context.Context, id string) (*CancelFlow, error) {
 	var out CancelFlow
-	if err := s.client.do(ctx, http.MethodGet, "/cancel-flows/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodGet, fmt.Sprintf("/cancel-flows/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -162,7 +162,7 @@ func (s *CancelFlowsService) Get(ctx context.Context, id string) (*CancelFlow, e
 // Update updates a cancel flow.
 func (s *CancelFlowsService) Update(ctx context.Context, id string, params *CancelFlowUpdateParams) (*CancelFlow, error) {
 	var out CancelFlow
-	if err := s.client.do(ctx, http.MethodPut, "/cancel-flows/"+id, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/cancel-flows/%s", id), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -180,7 +180,7 @@ func (s *CancelFlowsService) AddStep(ctx context.Context, id string, params *Can
 // UpdateStep updates a cancel flow step.
 func (s *CancelFlowsService) UpdateStep(ctx context.Context, stepID string, params *CancelFlowStepUpdateParams) (*CancelFlowStep, error) {
 	var out CancelFlowStep
-	if err := s.client.do(ctx, http.MethodPut, "/cancel-flows/steps/"+stepID, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/cancel-flows/steps/%s", stepID), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -189,7 +189,7 @@ func (s *CancelFlowsService) UpdateStep(ctx context.Context, stepID string, para
 // DeleteStep deletes a cancel flow step.
 func (s *CancelFlowsService) DeleteStep(ctx context.Context, stepID string) (*StatusResponse, error) {
 	var out StatusResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/cancel-flows/steps/"+stepID, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/cancel-flows/steps/%s", stepID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -208,7 +208,7 @@ func (s *CancelFlowsService) StartSession(ctx context.Context, params *CancelFlo
 // GetSession retrieves a cancel flow session.
 func (s *CancelFlowsService) GetSession(ctx context.Context, id string) (*CancelFlowSession, error) {
 	var out CancelFlowSession
-	if err := s.client.do(ctx, http.MethodGet, "/cancel-flows/sessions/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodGet, fmt.Sprintf("/cancel-flows/sessions/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
