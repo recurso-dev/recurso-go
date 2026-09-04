@@ -123,7 +123,7 @@ func (s *InvoicesService) List(ctx context.Context, params *InvoiceListParams) (
 // Get returns one invoice by id, scoped to the authenticated tenant. A
 // foreign or missing invoice is a flat 404.
 func (s *InvoicesService) Get(ctx context.Context, id string) (*Invoice, error) {
-	return getData[*Invoice](ctx, s.client, http.MethodGet, "/invoices/"+id, nil)
+	return getData[*Invoice](ctx, s.client, http.MethodGet, fmt.Sprintf("/invoices/%s", id), nil)
 }
 
 // PDFURL returns the public URL for an invoice's printable document. It does
@@ -154,6 +154,125 @@ func (s *InvoicesService) RetryEInvoice(ctx context.Context, id string) (*EInvoi
 func (s *InvoicesService) CancelEInvoice(ctx context.Context, id string, params *EInvoiceCancelParams) (*MessageResponse, error) {
 	var out MessageResponse
 	if err := s.client.do(ctx, http.MethodPost, fmt.Sprintf("/invoices/%s/einvoice/cancel", id), params, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// InvoiceJournalEntries is the ledger drill-down for an invoice.
+type InvoiceJournalEntries struct {
+	InvoiceID string         `json:"invoice_id"`
+	Entries   []JournalEntry `json:"entries"`
+}
+
+// InvoicePaymentAttempts is an invoice's settlement history.
+type InvoicePaymentAttempts struct {
+	InvoiceID string           `json:"invoice_id"`
+	Attempts  []PaymentAttempt `json:"attempts"`
+}
+
+// InvoiceStatusChange is one transition in an invoice's status timeline.
+// FromStatus is nil for the initial status.
+type InvoiceStatusChange struct {
+	ID         string    `json:"id"`
+	InvoiceID  string    `json:"invoice_id"`
+	FromStatus *string   `json:"from_status"`
+	ToStatus   string    `json:"to_status"`
+	ChangedAt  time.Time `json:"changed_at"`
+}
+
+// InvoiceStatusHistory is an invoice's status timeline, oldest first.
+type InvoiceStatusHistory struct {
+	InvoiceID string                `json:"invoice_id"`
+	History   []InvoiceStatusChange `json:"history"`
+}
+
+// EUEInvoice is the EU e-invoice (EN 16931 / UBL) generated for an invoice.
+// Document is the serialized XML.
+type EUEInvoice struct {
+	ID             string     `json:"id"`
+	TenantID       string     `json:"tenant_id"`
+	InvoiceID      string     `json:"invoice_id"`
+	Syntax         string     `json:"syntax"`
+	Status         string     `json:"status"`
+	Document       string     `json:"document"`
+	RecipientVATID string     `json:"recipient_vat_id"`
+	MessageID      string     `json:"message_id"`
+	ErrorMessage   string     `json:"error_message"`
+	RetryCount     int        `json:"retry_count"`
+	NextRetryAt    *time.Time `json:"next_retry_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+// EUEInvoiceRetryResult is returned by RetryEUEInvoice. EUEInvoice is nil
+// when nothing was generated (Message explains why).
+type EUEInvoiceRetryResult struct {
+	EUEInvoice *EUEInvoice `json:"data"`
+	Message    string      `json:"message"`
+}
+
+// PaymentWallStatus reports whether the customer is blocked behind the
+// invoice until it is paid.
+type PaymentWallStatus struct {
+	InvoiceID         string `json:"invoice_id"`
+	PaymentWallActive bool   `json:"payment_wall_active"`
+}
+
+// JournalEntries returns the ledger transactions posted for an invoice.
+func (s *InvoicesService) JournalEntries(ctx context.Context, id string) (*InvoiceJournalEntries, error) {
+	return getData[*InvoiceJournalEntries](ctx, s.client, http.MethodGet, fmt.Sprintf("/invoices/%s/journal-entries", id), nil)
+}
+
+// PaymentAttempts returns every gateway payment attempt against an invoice.
+func (s *InvoicesService) PaymentAttempts(ctx context.Context, id string) (*InvoicePaymentAttempts, error) {
+	return getData[*InvoicePaymentAttempts](ctx, s.client, http.MethodGet, fmt.Sprintf("/invoices/%s/payment-attempts", id), nil)
+}
+
+// StatusHistory returns an invoice's status timeline.
+func (s *InvoicesService) StatusHistory(ctx context.Context, id string) (*InvoiceStatusHistory, error) {
+	return getData[*InvoiceStatusHistory](ctx, s.client, http.MethodGet, fmt.Sprintf("/invoices/%s/status-history", id), nil)
+}
+
+// DownloadPDF returns the invoice's printable document (HTML). See PDFURL
+// for the public link.
+func (s *InvoicesService) DownloadPDF(ctx context.Context, id string) ([]byte, error) {
+	return s.client.doRaw(ctx, http.MethodGet, fmt.Sprintf("/invoices/%s/pdf", id), "text/html")
+}
+
+// PreviewHTML renders the invoice as HTML.
+func (s *InvoicesService) PreviewHTML(ctx context.Context, id string) ([]byte, error) {
+	return s.client.doRaw(ctx, http.MethodGet, fmt.Sprintf("/invoices/%s/preview", id), "text/html")
+}
+
+// Send emails the invoice to the customer.
+func (s *InvoicesService) Send(ctx context.Context, id string) (*MessageResponse, error) {
+	var out MessageResponse
+	if err := s.client.do(ctx, http.MethodPost, fmt.Sprintf("/invoices/%s/send", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// EUEInvoice returns the EU e-invoice for an invoice, or nil when none has
+// been generated.
+func (s *InvoicesService) EUEInvoice(ctx context.Context, id string) (*EUEInvoice, error) {
+	return getData[*EUEInvoice](ctx, s.client, http.MethodGet, fmt.Sprintf("/invoices/%s/eu-einvoice", id), nil)
+}
+
+// RetryEUEInvoice regenerates and re-transmits the EU e-invoice.
+func (s *InvoicesService) RetryEUEInvoice(ctx context.Context, id string) (*EUEInvoiceRetryResult, error) {
+	var out EUEInvoiceRetryResult
+	if err := s.client.do(ctx, http.MethodPost, fmt.Sprintf("/invoices/%s/eu-einvoice/retry", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PaymentWall returns whether the payment wall is active for an invoice.
+func (s *InvoicesService) PaymentWall(ctx context.Context, id string) (*PaymentWallStatus, error) {
+	var out PaymentWallStatus
+	if err := s.client.do(ctx, http.MethodGet, fmt.Sprintf("/invoices/%s/payment-wall", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

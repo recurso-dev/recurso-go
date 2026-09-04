@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -53,7 +54,7 @@ func (s *CouponsService) Create(ctx context.Context, params *CouponCreateParams)
 // "activated" or "deactivated".
 func (s *CouponsService) Update(ctx context.Context, id string, params *CouponUpdateParams) (*StatusResponse, error) {
 	var out StatusResponse
-	if err := s.client.do(ctx, http.MethodPut, "/coupons/"+id, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/coupons/%s", id), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -62,4 +63,9 @@ func (s *CouponsService) Update(ctx context.Context, id string, params *CouponUp
 // List returns the tenant's coupons.
 func (s *CouponsService) List(ctx context.Context) ([]Coupon, error) {
 	return getData[[]Coupon](ctx, s.client, http.MethodGet, "/coupons", nil)
+}
+
+// Get retrieves a coupon by ID.
+func (s *CouponsService) Get(ctx context.Context, id string) (*Coupon, error) {
+	return getData[*Coupon](ctx, s.client, http.MethodGet, fmt.Sprintf("/coupons/%s", id), nil)
 }

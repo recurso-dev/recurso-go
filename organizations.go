@@ -76,7 +76,7 @@ func (s *OrganizationsService) List(ctx context.Context) ([]Organization, error)
 
 // Get retrieves an organization by ID.
 func (s *OrganizationsService) Get(ctx context.Context, id string) (*Organization, error) {
-	out, err := getData[Organization](ctx, s.client, http.MethodGet, "/organizations/"+id, nil)
+	out, err := getData[Organization](ctx, s.client, http.MethodGet, fmt.Sprintf("/organizations/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (s *OrganizationsService) Get(ctx context.Context, id string) (*Organizatio
 
 // Update updates an organization.
 func (s *OrganizationsService) Update(ctx context.Context, id string, params *OrganizationUpdateParams) (*Organization, error) {
-	out, err := getData[Organization](ctx, s.client, http.MethodPut, "/organizations/"+id, params)
+	out, err := getData[Organization](ctx, s.client, http.MethodPut, fmt.Sprintf("/organizations/%s", id), params)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (s *OrganizationsService) Update(ctx context.Context, id string, params *Or
 // Delete deletes an organization.
 func (s *OrganizationsService) Delete(ctx context.Context, id string) (*StatusResponse, error) {
 	var out StatusResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/organizations/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/organizations/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

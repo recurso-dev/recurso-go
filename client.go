@@ -23,38 +23,51 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 
-	Account          *AccountService
-	Accounting       *AccountingService
-	Analytics        *AnalyticsService
-	AuditLogs        *AuditLogsService
-	BillableMetrics  *BillableMetricsService
-	CancelFlows      *CancelFlowsService
-	Churn            *ChurnService
-	Collections      *CollectionsService
-	Coupons          *CouponsService
-	CreditNotes      *CreditNotesService
-	Customers        *CustomersService
-	Developer        *DeveloperService
-	DunningCampaigns *DunningCampaignsService
-	Entities         *EntitiesService
-	Entitlements     *EntitlementsService
-	Events           *EventsService
-	Gifts            *GiftsService
-	Disputes         *DisputesService
-	Invoices         *InvoicesService
-	Ledger           *LedgerService
-	Mandates         *MandatesService
-	OfflinePayments  *OfflinePaymentsService
-	Organizations    *OrganizationsService
-	Plans            *PlansService
-	Quotes           *QuotesService
-	Referrals        *ReferralsService
-	Subscriptions    *SubscriptionsService
-	Usage            *UsageService
-	UsageAlerts      *UsageAlertsService
-	VirtualAccounts  *VirtualAccountsService
-	Wallets          *WalletsService
-	Webhooks         *WebhooksService
+	Account                *AccountService
+	Accounting             *AccountingService
+	Analytics              *AnalyticsService
+	AuditLogs              *AuditLogsService
+	Auth                   *AuthService
+	BillableMetrics        *BillableMetricsService
+	Billing                *BillingService
+	CancelFlows            *CancelFlowsService
+	Churn                  *ChurnService
+	Collections            *CollectionsService
+	Consents               *ConsentsService
+	Coupons                *CouponsService
+	CreditNotes            *CreditNotesService
+	Customers              *CustomersService
+	Developer              *DeveloperService
+	DunningCampaigns       *DunningCampaignsService
+	Entities               *EntitiesService
+	Entitlements           *EntitlementsService
+	Events                 *EventsService
+	Finance                *FinanceService
+	GatewayConnections     *GatewayConnectionsService
+	Gifts                  *GiftsService
+	Disputes               *DisputesService
+	Imports                *ImportsService
+	India                  *IndiaService
+	IntegrationConnections *IntegrationConnectionsService
+	Invoices               *InvoicesService
+	Ledger                 *LedgerService
+	Mandates               *MandatesService
+	OfflinePayments        *OfflinePaymentsService
+	Organizations          *OrganizationsService
+	PaymentAttempts        *PaymentAttemptsService
+	Plans                  *PlansService
+	Quotes                 *QuotesService
+	Referrals              *ReferralsService
+	Settings               *SettingsService
+	SSO                    *SSOService
+	Subscriptions          *SubscriptionsService
+	System                 *SystemService
+	Usage                  *UsageService
+	UsageAlerts            *UsageAlertsService
+	Users                  *UsersService
+	VirtualAccounts        *VirtualAccountsService
+	Wallets                *WalletsService
+	Webhooks               *WebhooksService
 }
 
 // Option configures a Client. Pass options to NewClient.
@@ -122,6 +135,19 @@ func NewClient(apiKey string, opts ...Option) *Client {
 	c.UsageAlerts = &UsageAlertsService{client: c}
 	c.Wallets = &WalletsService{client: c}
 	c.Webhooks = &WebhooksService{client: c}
+	c.Auth = &AuthService{client: c}
+	c.Billing = &BillingService{client: c}
+	c.Consents = &ConsentsService{client: c}
+	c.Finance = &FinanceService{client: c}
+	c.GatewayConnections = &GatewayConnectionsService{client: c}
+	c.Imports = &ImportsService{client: c}
+	c.India = &IndiaService{client: c}
+	c.IntegrationConnections = &IntegrationConnectionsService{client: c}
+	c.PaymentAttempts = &PaymentAttemptsService{client: c}
+	c.Settings = &SettingsService{client: c}
+	c.SSO = &SSOService{client: c}
+	c.System = &SystemService{client: c}
+	c.Users = &UsersService{client: c}
 	return c
 }
 
@@ -130,34 +156,70 @@ func NewClient(apiKey string, opts ...Option) *Client {
 // decoded into out (when out is non-nil). On a non-2xx response it decodes the
 // error envelope into a *APIError.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	return c.doURL(ctx, method, c.baseURL+path, body, out)
+}
+
+// doRoot is do for the handful of unversioned endpoints (e.g. /version) that
+// live beside, not under, the /v1 prefix carried by the base URL.
+func (c *Client) doRoot(ctx context.Context, method, path string, body, out any) error {
+	return c.doURL(ctx, method, c.rootURL()+path, body, out)
+}
+
+// rootURL is the base URL with its /v1 version prefix removed.
+func (c *Client) rootURL() string {
+	return strings.TrimSuffix(c.baseURL, "/v1")
+}
+
+// doURL sends an authenticated request to an absolute URL. See do.
+func (c *Client) doURL(ctx context.Context, method, rawURL string, body, out any) error {
+	data, err := c.send(ctx, method, rawURL, "application/json", body)
+	if err != nil {
+		return err
+	}
+	if out != nil && len(data) > 0 {
+		return json.Unmarshal(data, out)
+	}
+	return nil
+}
+
+// doRaw performs an authenticated request whose successful body is not JSON
+// (printable HTML documents, CSV exports) and returns the raw bytes. accept
+// is sent as the Accept header. Non-2xx responses still decode into *APIError.
+func (c *Client) doRaw(ctx context.Context, method, path, accept string) ([]byte, error) {
+	return c.send(ctx, method, c.baseURL+path, accept, nil)
+}
+
+// send is the transport shared by do and doRaw: it builds the request, sets
+// auth and content headers, and turns non-2xx responses into *APIError.
+func (c *Client) send(ctx context.Context, method, rawURL, accept string, body any) ([]byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		reqBody = bytes.NewReader(buf)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, reqBody)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -169,13 +231,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		} else {
 			apiErr.Message = strings.TrimSpace(string(data))
 		}
-		return apiErr
+		return nil, apiErr
 	}
-
-	if out != nil && len(data) > 0 {
-		return json.Unmarshal(data, out)
-	}
-	return nil
+	return data, nil
 }
 
 // dataEnvelope wraps the common {"data": ...} response shape.
@@ -216,6 +274,14 @@ func (q *query) str(key, val string) *query {
 func (q *query) int(key string, val int) *query {
 	if val != 0 {
 		q.values.Set(key, strconv.Itoa(val))
+	}
+	return q
+}
+
+// boolean sets key to "true" when val is set.
+func (q *query) boolean(key string, val bool) *query {
+	if val {
+		q.values.Set(key, "true")
 	}
 	return q
 }

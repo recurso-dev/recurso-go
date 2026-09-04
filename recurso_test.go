@@ -3,6 +3,8 @@ package recurso
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1295,4 +1297,1181 @@ func TestQuotesListPaging(t *testing.T) {
 	if ts.query != "limit=200&offset=400" {
 		t.Errorf("query = %q", ts.query)
 	}
+}
+
+// apiCall is one table-driven request/response check: it drives a client
+// method against a mock server and asserts method, path, query, and the
+// decoded result.
+type apiCall struct {
+	name   string
+	status int
+	body   string
+	method string
+	path   string
+	query  string
+	fn     func(c *Client) (any, error)
+	check  func(t *testing.T, got any)
+}
+
+func runCalls(t *testing.T, calls []apiCall) {
+	t.Helper()
+	for _, tc := range calls {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			status := tc.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			ts := newTestServer(t, status, tc.body)
+			got, err := tc.fn(ts.client)
+			if err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			ts.assertRequest(tc.method, tc.path)
+			if ts.query != tc.query {
+				t.Errorf("query = %q, want %q", ts.query, tc.query)
+			}
+			if tc.check != nil {
+				tc.check(t, got)
+			}
+		})
+	}
+}
+
+func TestCustomersFinancialSummary(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"customer_id":"cus_1","currencies":[{"currency":"USD","outstanding":5000,"past_due":2000,"past_due_count":1,"billed":90000,"paid":85000}]}}`)
+	fs, err := ts.client.Customers.FinancialSummary(context.Background(), "cus_1")
+	if err != nil {
+		t.Fatalf("FinancialSummary: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/customers/cus_1/financial-summary")
+	if fs.CustomerID != "cus_1" || len(fs.Currencies) != 1 || fs.Currencies[0].PastDue != 2000 || fs.Currencies[0].Paid != 85000 {
+		t.Errorf("summary = %+v", fs)
+	}
+}
+
+func TestCouponsGet(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"cpn_1","code":"SAVE10","discount_type":"percent","discount_value":10,"duration":"forever"}}`)
+	c, err := ts.client.Coupons.Get(context.Background(), "cpn_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/coupons/cpn_1")
+	if c.Code != "SAVE10" || c.DiscountValue != 10 {
+		t.Errorf("coupon = %+v", c)
+	}
+}
+
+func TestDisputesGet(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"dsp_1","invoice_id":"inv_1","reason":"double charge","status":"open","note":null}}`)
+	d, err := ts.client.Disputes.Get(context.Background(), "dsp_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/disputes/dsp_1")
+	if d.Reason != "double charge" || d.Status != "open" {
+		t.Errorf("dispute = %+v", d)
+	}
+}
+
+func TestDeveloperRevokeKey(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"status":"revoked"}`)
+	res, err := ts.client.Developer.RevokeKey(context.Background(), "key_1")
+	if err != nil {
+		t.Fatalf("RevokeKey: %v", err)
+	}
+	ts.assertRequest(http.MethodDelete, "/developer/keys/key_1")
+	if res.Status != "revoked" {
+		t.Errorf("status = %q", res.Status)
+	}
+}
+
+func TestCreditNotesLifecycle(t *testing.T) {
+	cn := `{"data":{"id":"cn_1","customer_id":"cus_1","amount":5000,"balance":5000,"currency":"USD","status":"%s"}}`
+	check := func(status string) func(t *testing.T, got any) {
+		return func(t *testing.T, got any) {
+			n := got.(*CreditNote)
+			if n.ID != "cn_1" || n.Status != status || n.Amount != 5000 {
+				t.Errorf("credit note = %+v", n)
+			}
+		}
+	}
+	runCalls(t, []apiCall{
+		{name: "approve", body: fmt.Sprintf(cn, "issued"), method: http.MethodPost, path: "/credit-notes/cn_1/approve",
+			fn: func(c *Client) (any, error) { return c.CreditNotes.Approve(context.Background(), "cn_1") }, check: check("issued")},
+		{name: "reject", body: fmt.Sprintf(cn, "rejected"), method: http.MethodPost, path: "/credit-notes/cn_1/reject",
+			fn: func(c *Client) (any, error) { return c.CreditNotes.Reject(context.Background(), "cn_1") }, check: check("rejected")},
+		{name: "void", body: fmt.Sprintf(cn, "void"), method: http.MethodPost, path: "/credit-notes/cn_1/void",
+			fn: func(c *Client) (any, error) { return c.CreditNotes.Void(context.Background(), "cn_1") }, check: check("void")},
+		{name: "journal-entries", body: `{"data":{"credit_note_id":"cn_1","entries":[{"transaction_id":"tx_1","code":5,"debit_account_code":4000,"debit_account_name":"Revenue","credit_account_code":1200,"credit_account_name":"AR","amount":5000,"accounting_version":2}]}}`,
+			method: http.MethodGet, path: "/credit-notes/cn_1/journal-entries",
+			fn: func(c *Client) (any, error) { return c.CreditNotes.JournalEntries(context.Background(), "cn_1") },
+			check: func(t *testing.T, got any) {
+				je := got.(*CreditNoteJournalEntries)
+				if je.CreditNoteID != "cn_1" || len(je.Entries) != 1 || je.Entries[0].DebitAccountCode != 4000 || je.Entries[0].Amount != 5000 {
+					t.Errorf("entries = %+v", je)
+				}
+			}},
+	})
+}
+
+func TestCreditNotesDownloadPDF(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `<html>credit note</html>`)
+	doc, err := ts.client.CreditNotes.DownloadPDF(context.Background(), "cn_1")
+	if err != nil {
+		t.Fatalf("DownloadPDF: %v", err)
+	}
+	if ts.method != http.MethodGet || ts.path != "/credit-notes/cn_1/pdf" || ts.accept != "text/html" {
+		t.Errorf("request = %s %s accept=%s", ts.method, ts.path, ts.accept)
+	}
+	if string(doc) != "<html>credit note</html>" {
+		t.Errorf("doc = %q", doc)
+	}
+}
+
+func TestInvoicesDrilldowns(t *testing.T) {
+	runCalls(t, []apiCall{
+		{name: "journal-entries", body: `{"data":{"invoice_id":"inv_1","entries":[{"transaction_id":"tx_1","debit_account_code":1200,"credit_account_code":4000,"amount":2900}]}}`,
+			method: http.MethodGet, path: "/invoices/inv_1/journal-entries",
+			fn: func(c *Client) (any, error) { return c.Invoices.JournalEntries(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				je := got.(*InvoiceJournalEntries)
+				if je.InvoiceID != "inv_1" || len(je.Entries) != 1 || je.Entries[0].CreditAccountCode != 4000 {
+					t.Errorf("entries = %+v", je)
+				}
+			}},
+		{name: "payment-attempts", body: `{"data":{"invoice_id":"inv_1","attempts":[{"id":"pa_1","gateway":"stripe","status":"failed","failure_code":"card_declined","amount":2900,"settled_at":null}]}}`,
+			method: http.MethodGet, path: "/invoices/inv_1/payment-attempts",
+			fn: func(c *Client) (any, error) { return c.Invoices.PaymentAttempts(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				pa := got.(*InvoicePaymentAttempts)
+				if len(pa.Attempts) != 1 || pa.Attempts[0].FailureCode != "card_declined" || pa.Attempts[0].SettledAt != nil {
+					t.Errorf("attempts = %+v", pa)
+				}
+			}},
+		{name: "status-history", body: `{"data":{"invoice_id":"inv_1","history":[{"id":"h_1","from_status":null,"to_status":"open","changed_at":"2026-08-01T00:00:00Z"},{"id":"h_2","from_status":"open","to_status":"paid","changed_at":"2026-08-02T00:00:00Z"}]}}`,
+			method: http.MethodGet, path: "/invoices/inv_1/status-history",
+			fn: func(c *Client) (any, error) { return c.Invoices.StatusHistory(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				h := got.(*InvoiceStatusHistory)
+				if len(h.History) != 2 || h.History[0].FromStatus != nil || *h.History[1].FromStatus != "open" || h.History[1].ToStatus != "paid" {
+					t.Errorf("history = %+v", h)
+				}
+			}},
+		{name: "send", body: `{"message":"Invoice emailed"}`, method: http.MethodPost, path: "/invoices/inv_1/send",
+			fn: func(c *Client) (any, error) { return c.Invoices.Send(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				if got.(*MessageResponse).Message != "Invoice emailed" {
+					t.Errorf("message = %+v", got)
+				}
+			}},
+		{name: "eu-einvoice", body: `{"data":{"id":"eu_1","invoice_id":"inv_1","syntax":"ubl","status":"sent","document":"<Invoice/>","retry_count":0}}`,
+			method: http.MethodGet, path: "/invoices/inv_1/eu-einvoice",
+			fn: func(c *Client) (any, error) { return c.Invoices.EUEInvoice(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				e := got.(*EUEInvoice)
+				if e.Status != "sent" || e.Document != "<Invoice/>" {
+					t.Errorf("eu einvoice = %+v", e)
+				}
+			}},
+		{name: "eu-einvoice-nil", body: `{"data":null}`, method: http.MethodGet, path: "/invoices/inv_1/eu-einvoice",
+			fn: func(c *Client) (any, error) { return c.Invoices.EUEInvoice(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				if got.(*EUEInvoice) != nil {
+					t.Errorf("want nil, got %+v", got)
+				}
+			}},
+		{name: "eu-einvoice-retry", body: `{"data":{"id":"eu_1","status":"pending","retry_count":1},"message":"re-queued"}`,
+			method: http.MethodPost, path: "/invoices/inv_1/eu-einvoice/retry",
+			fn: func(c *Client) (any, error) { return c.Invoices.RetryEUEInvoice(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				r := got.(*EUEInvoiceRetryResult)
+				if r.Message != "re-queued" || r.EUEInvoice == nil || r.EUEInvoice.RetryCount != 1 {
+					t.Errorf("retry = %+v", r)
+				}
+			}},
+		{name: "payment-wall", body: `{"invoice_id":"inv_1","payment_wall_active":true}`, method: http.MethodGet, path: "/invoices/inv_1/payment-wall",
+			fn: func(c *Client) (any, error) { return c.Invoices.PaymentWall(context.Background(), "inv_1") },
+			check: func(t *testing.T, got any) {
+				if !got.(*PaymentWallStatus).PaymentWallActive {
+					t.Errorf("wall = %+v", got)
+				}
+			}},
+	})
+}
+
+func TestInvoicesRawDocuments(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `<html>invoice</html>`)
+	doc, err := ts.client.Invoices.DownloadPDF(context.Background(), "inv_1")
+	if err != nil {
+		t.Fatalf("DownloadPDF: %v", err)
+	}
+	if ts.method != http.MethodGet || ts.path != "/invoices/inv_1/pdf" || ts.accept != "text/html" || string(doc) != "<html>invoice</html>" {
+		t.Errorf("request = %s %s accept=%s doc=%q", ts.method, ts.path, ts.accept, doc)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `<html>preview</html>`)
+	doc, err = ts.client.Invoices.PreviewHTML(context.Background(), "inv_1")
+	if err != nil {
+		t.Fatalf("PreviewHTML: %v", err)
+	}
+	if ts.path != "/invoices/inv_1/preview" || string(doc) != "<html>preview</html>" {
+		t.Errorf("path = %s doc=%q", ts.path, doc)
+	}
+}
+
+func TestRawRequestError(t *testing.T) {
+	ts := newTestServer(t, http.StatusNotFound, `{"error":{"code":"not_found","message":"invoice not found"}}`)
+	_, err := ts.client.Invoices.DownloadPDF(context.Background(), "missing")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != 404 || apiErr.Code != "not_found" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSubscriptionsFinancials(t *testing.T) {
+	runCalls(t, []apiCall{
+		{name: "financial-summary", body: `{"data":{"subscription_id":"sub_1","status":"active","currency":"USD","mrr":2900,"recurring_amount":2900,"interval_unit":"month","interval_count":1,"next_invoice_date":"2026-10-01T00:00:00Z","next_invoice_base_amount":2900,"coupon_id":null,"discount_active":false,"outstanding":[{"currency":"USD","outstanding":0,"billed":5800,"paid":5800}]}}`,
+			method: http.MethodGet, path: "/subscriptions/sub_1/financial-summary",
+			fn: func(c *Client) (any, error) { return c.Subscriptions.FinancialSummary(context.Background(), "sub_1") },
+			check: func(t *testing.T, got any) {
+				fs := got.(*SubscriptionFinancialSummary)
+				if fs.MRR != 2900 || fs.NextInvoiceDate == nil || fs.CouponID != nil || len(fs.Outstanding) != 1 || fs.Outstanding[0].Billed != 5800 {
+					t.Errorf("summary = %+v", fs)
+				}
+			}},
+		{name: "cancel-preview", body: `{"data":{"subscription_id":"sub_1","immediately":true,"resulting_status":"canceled","currency":"USD","deferred_revenue_forfeited":1450,"recognized_as_breakage":1450,"avoided_future_recurring":2900,"flat_fee_refund":0}}`,
+			method: http.MethodGet, path: "/subscriptions/sub_1/cancel-preview", query: "immediately=true",
+			fn: func(c *Client) (any, error) {
+				return c.Subscriptions.CancelPreview(context.Background(), "sub_1", true)
+			},
+			check: func(t *testing.T, got any) {
+				p := got.(*CancelPreview)
+				if !p.Immediately || p.DeferredRevenueForfeited != 1450 || p.AvoidedFutureRecurring != 2900 {
+					t.Errorf("preview = %+v", p)
+				}
+			}},
+		{name: "cancel-preview-period-end", body: `{"data":{"subscription_id":"sub_1","immediately":false}}`,
+			method: http.MethodGet, path: "/subscriptions/sub_1/cancel-preview",
+			fn: func(c *Client) (any, error) {
+				return c.Subscriptions.CancelPreview(context.Background(), "sub_1", false)
+			}},
+		{name: "history", body: `{"data":{"subscription_id":"sub_1","history":[{"id":"h_1","change_type":"status","from_value":null,"to_value":"active","changed_at":"2026-08-01T00:00:00Z"},{"id":"h_2","change_type":"plan","from_value":"plan_1","to_value":"plan_2","changed_at":"2026-08-15T00:00:00Z"}]}}`,
+			method: http.MethodGet, path: "/subscriptions/sub_1/history",
+			fn: func(c *Client) (any, error) { return c.Subscriptions.History(context.Background(), "sub_1") },
+			check: func(t *testing.T, got any) {
+				h := got.(*SubscriptionHistory)
+				if len(h.History) != 2 || h.History[0].FromValue != nil || *h.History[1].FromValue != "plan_1" || h.History[1].ChangeType != "plan" {
+					t.Errorf("history = %+v", h)
+				}
+			}},
+		{name: "bill-usage", status: http.StatusCreated, body: `{"id":"inv_9","subscription_id":"sub_1","billing_reason":"usage_interim","total":1234,"status":"open"}`,
+			method: http.MethodPost, path: "/subscriptions/sub_1/bill-usage",
+			fn: func(c *Client) (any, error) { return c.Subscriptions.BillUsage(context.Background(), "sub_1") },
+			check: func(t *testing.T, got any) {
+				inv := got.(*Invoice)
+				if inv.ID != "inv_9" || inv.Total != 1234 {
+					t.Errorf("invoice = %+v", inv)
+				}
+			}},
+		{name: "consent", body: `{"id":"con_1","customer_id":"cus_1","subscription_id":"sub_1","consent_type":"recurring_billing","granted":true,"version":"v1"}`,
+			method: http.MethodGet, path: "/subscriptions/sub_1/consent",
+			fn: func(c *Client) (any, error) { return c.Subscriptions.Consent(context.Background(), "sub_1") },
+			check: func(t *testing.T, got any) {
+				con := got.(*Consent)
+				if con.ID != "con_1" || con.ConsentType != "recurring_billing" || !con.Granted {
+					t.Errorf("consent = %+v", con)
+				}
+			}},
+		{name: "cancellation-reasons", body: `{"object":"list","data":[{"id":"too_expensive","label":"Too expensive","allows_feedback":true},{"id":"other","label":"Other","allows_feedback":true}]}`,
+			method: http.MethodGet, path: "/cancellation-reasons",
+			fn: func(c *Client) (any, error) { return c.Subscriptions.CancellationReasons(context.Background()) },
+			check: func(t *testing.T, got any) {
+				rs := got.([]CancellationReason)
+				if len(rs) != 2 || rs[0].ID != "too_expensive" || !rs[0].AllowsFeedback {
+					t.Errorf("reasons = %+v", rs)
+				}
+			}},
+	})
+}
+
+func TestConsents(t *testing.T) {
+	ts := newTestServer(t, http.StatusCreated, `{"id":"con_1","customer_id":"cus_1","consent_type":"recurring_billing","granted":true}`)
+	con, err := ts.client.Consents.Record(context.Background(), &ConsentRecordParams{CustomerID: "cus_1", ConsentType: "recurring_billing", Granted: true, ConsentText: "I agree"})
+	if err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/consents")
+	if body := ts.bodyMap(); body["consent_type"] != "recurring_billing" || body["granted"] != true || body["consent_text"] != "I agree" {
+		t.Errorf("body = %v", body)
+	}
+	if con.ID != "con_1" || !con.Granted {
+		t.Errorf("consent = %+v", con)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"message":"consent revoked"}`)
+	res, err := ts.client.Consents.Revoke(context.Background(), "con_1")
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/consents/revoke")
+	if ts.bodyMap()["consent_id"] != "con_1" || res.Message != "consent revoked" {
+		t.Errorf("body = %v res = %+v", ts.bodyMap(), res)
+	}
+}
+
+func TestAccountingConnect(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"auth_url":"https://appcenter.intuit.com/connect?state=abc"}`)
+	res, err := ts.client.Accounting.Connect(context.Background(), "quickbooks")
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/accounting/connect/quickbooks")
+	if res.AuthURL != "https://appcenter.intuit.com/connect?state=abc" {
+		t.Errorf("auth_url = %q", res.AuthURL)
+	}
+	want := ts.server.URL + "/accounting/callback/quickbooks?code=c1&realmId=r1&state=s1"
+	if got := ts.client.Accounting.CallbackURL("quickbooks", "c1", "s1", "r1"); got != want {
+		t.Errorf("CallbackURL = %q, want %q", got, want)
+	}
+}
+
+func TestAnalyticsReports(t *testing.T) {
+	runCalls(t, []apiCall{
+		{name: "ask", body: `{"data":[{"plan":"Pro","mrr":2900}],"query":"SELECT plan, mrr FROM ..."}`, method: http.MethodPost, path: "/analytics/ask",
+			fn: func(c *Client) (any, error) { return c.Analytics.Ask(context.Background(), "MRR by plan?") },
+			check: func(t *testing.T, got any) {
+				a := got.(*AnalyticsAnswer)
+				var rows []map[string]any
+				if err := json.Unmarshal(a.Data, &rows); err != nil || len(rows) != 1 || rows[0]["plan"] != "Pro" || !strings.HasPrefix(a.Query, "SELECT") {
+					t.Errorf("answer = %+v (%v)", a, err)
+				}
+			}},
+		{name: "dunning-overview", body: `{"total_retries":40,"total_successes":10,"success_rate":0.25}`, method: http.MethodGet, path: "/analytics/dunning/overview",
+			fn: func(c *Client) (any, error) { return c.Analytics.DunningOverview(context.Background()) },
+			check: func(t *testing.T, got any) {
+				o := got.(*DunningOverview)
+				if o.TotalRetries != 40 || o.SuccessRate != 0.25 {
+					t.Errorf("overview = %+v", o)
+				}
+			}},
+		{name: "dunning-weights", body: `{"data":[{"context_key":"card_declined","action_id":"retry_1d","average_reward":0.4,"sample_count":12}]}`, method: http.MethodGet, path: "/analytics/dunning/weights",
+			fn: func(c *Client) (any, error) { return c.Analytics.DunningWeights(context.Background()) },
+			check: func(t *testing.T, got any) {
+				w := got.([]DunningWeight)
+				if len(w) != 1 || w[0].ActionID != "retry_1d" || w[0].SampleCount != 12 {
+					t.Errorf("weights = %+v", w)
+				}
+			}},
+		{name: "dunning-history", body: `{"data":[{"id":"d_1","invoice_id":"inv_1","action_id":"retry_1d","retry_interval":86400,"outcome":"success","reward":1}]}`, method: http.MethodGet, path: "/analytics/dunning/history", query: "limit=25",
+			fn: func(c *Client) (any, error) { return c.Analytics.DunningHistory(context.Background(), 25) },
+			check: func(t *testing.T, got any) {
+				h := got.([]DunningAttempt)
+				if len(h) != 1 || h[0].Outcome != "success" || h[0].RetryInterval != 86400 {
+					t.Errorf("history = %+v", h)
+				}
+			}},
+		{name: "dunning-recovered", body: `{"recovered_amount_total":{"USD":12000},"recovered_count":3,"avg_attempts":1.5,"avg_days_to_recover":2.2,"monthly":[{"month":"2026-08","currency":"USD","amount":12000,"count":3}]}`, method: http.MethodGet, path: "/analytics/dunning/recovered",
+			fn: func(c *Client) (any, error) { return c.Analytics.DunningRecovered(context.Background()) },
+			check: func(t *testing.T, got any) {
+				r := got.(*DunningRecovered)
+				if r.RecoveredAmountTotal["USD"] != 12000 || r.RecoveredCount != 3 || len(r.Monthly) != 1 || r.Monthly[0].Amount != 12000 {
+					t.Errorf("recovered = %+v", r)
+				}
+			}},
+		{name: "mrr-waterfall", body: `{"data":{"start_date":"2026-07-01T00:00:00Z","end_date":"2026-08-01T00:00:00Z","starting_mrr":10000,"new":2000,"expansion":500,"contraction":300,"churned":700,"reactivation":0,"ending_mrr":11500,"reporting_currency":"USD","net_dollar_retention":0.95,"gross_dollar_retention":0.9,"has_start_history":true}}`,
+			method: http.MethodGet, path: "/analytics/mrr/waterfall", query: "end=2026-08-01&entity_id=ent_1&start=2026-07-01",
+			fn: func(c *Client) (any, error) {
+				return c.Analytics.MRRWaterfall(context.Background(), &MRRWaterfallParams{Start: "2026-07-01", End: "2026-08-01", EntityID: "ent_1"})
+			},
+			check: func(t *testing.T, got any) {
+				w := got.(*MRRWaterfall)
+				if w.StartingMRR != 10000 || w.EndingMRR != 11500 || w.Churned != 700 || !w.HasStartHistory {
+					t.Errorf("waterfall = %+v", w)
+				}
+			}},
+		{name: "mrr-waterfall-default", body: `{"data":{"starting_mrr":1}}`, method: http.MethodGet, path: "/analytics/mrr/waterfall",
+			fn: func(c *Client) (any, error) { return c.Analytics.MRRWaterfall(context.Background(), nil) }},
+		{name: "revenue-by-plan", body: `{"data":{"reporting_currency":"USD","total_mrr":11500,"segments":[{"key":"plan_1","label":"Pro","mrr":9000,"subscriptions":3,"share_pct":78.3}]}}`, method: http.MethodGet, path: "/analytics/revenue-by-plan",
+			fn: func(c *Client) (any, error) { return c.Analytics.RevenueByPlan(context.Background()) },
+			check: func(t *testing.T, got any) {
+				r := got.(*RevenueBreakdown)
+				if r.TotalMRR != 11500 || len(r.Segments) != 1 || r.Segments[0].Label != "Pro" || r.Segments[0].SharePct != 78.3 {
+					t.Errorf("by plan = %+v", r)
+				}
+			}},
+		{name: "revenue-by-geography", body: `{"data":{"reporting_currency":"USD","total_mrr":11500,"segments":[{"key":"IN","label":"India","mrr":2500,"subscriptions":5,"share_pct":21.7}]}}`, method: http.MethodGet, path: "/analytics/revenue-by-geography",
+			fn: func(c *Client) (any, error) { return c.Analytics.RevenueByGeography(context.Background()) },
+			check: func(t *testing.T, got any) {
+				r := got.(*RevenueBreakdown)
+				if len(r.Segments) != 1 || r.Segments[0].Key != "IN" || r.Segments[0].MRR != 2500 {
+					t.Errorf("by geo = %+v", r)
+				}
+			}},
+		{name: "unit-economics", body: `{"data":{"reporting_currency":"USD","mrr":11500,"active_customers":10,"active_subscriptions":12,"arpa":1150,"arpu":958,"monthly_churn_rate":2.5,"ltv":46000,"has_ltv":true}}`, method: http.MethodGet, path: "/analytics/unit-economics",
+			fn: func(c *Client) (any, error) { return c.Analytics.UnitEconomics(context.Background()) },
+			check: func(t *testing.T, got any) {
+				u := got.(*UnitEconomics)
+				if u.ARPA != 1150 || u.LTV != 46000 || !u.HasLTV || u.MonthlyChurnRate != 2.5 {
+					t.Errorf("unit economics = %+v", u)
+				}
+			}},
+		{name: "usage-stats", body: `{"data":[{"dimension":"api_calls","total_quantity":120000}],"customers_metered":7}`, method: http.MethodGet, path: "/analytics/usage",
+			fn: func(c *Client) (any, error) { return c.Analytics.UsageStats(context.Background()) },
+			check: func(t *testing.T, got any) {
+				u := got.(*UsageStats)
+				if u.CustomersMetered != 7 || len(u.Dimensions) != 1 || u.Dimensions[0].TotalQuantity != 120000 {
+					t.Errorf("usage = %+v", u)
+				}
+			}},
+	})
+}
+
+func TestLedgerReports(t *testing.T) {
+	runCalls(t, []apiCall{
+		{name: "transaction", body: `{"data":{"transaction_id":"tx_1","code":1,"debit_account_id":"acc_1","debit_account_code":1200,"debit_account_name":"AR","credit_account_id":"acc_2","credit_account_code":4000,"credit_account_name":"Revenue","amount":2900,"reference_id":"inv_1","description":"Invoice INV-1","accounting_version":2,"entity_id":"ent_1","entity_name":"Recurso Inc"}}`,
+			method: http.MethodGet, path: "/ledger/transactions/tx_1",
+			fn: func(c *Client) (any, error) { return c.Ledger.Transaction(context.Background(), "tx_1") },
+			check: func(t *testing.T, got any) {
+				je := got.(*JournalEntry)
+				if je.TransactionID != "tx_1" || je.Amount != 2900 || je.CreditAccountName != "Revenue" || je.EntityID == nil || *je.EntityID != "ent_1" {
+					t.Errorf("entry = %+v", je)
+				}
+			}},
+		{name: "trial-balance", body: `{"data":{"tenant_id":"t_1","lines":[{"account_id":"acc_1","code":1200,"name":"AR","type":1,"debits":5000,"credits":2000,"balance":3000,"abnormal":false}],"total_debits":5000,"total_credits":5000,"balanced":true,"as_of":"2026-08-31T00:00:00Z","reporting_currency":"USD"}}`,
+			method: http.MethodGet, path: "/ledger/trial-balance", query: "consolidated=true",
+			fn: func(c *Client) (any, error) {
+				return c.Ledger.TrialBalance(context.Background(), &TrialBalanceParams{Consolidated: true})
+			},
+			check: func(t *testing.T, got any) {
+				tb := got.(*TrialBalance)
+				if !tb.Balanced || tb.TotalDebits != 5000 || len(tb.Lines) != 1 || tb.Lines[0].Balance != 3000 || tb.Lines[0].Code != 1200 {
+					t.Errorf("trial balance = %+v", tb)
+				}
+			}},
+		{name: "trial-balance-entity", body: `{"data":{"balanced":true}}`, method: http.MethodGet, path: "/ledger/trial-balance", query: "entity_id=ent_1",
+			fn: func(c *Client) (any, error) {
+				return c.Ledger.TrialBalance(context.Background(), &TrialBalanceParams{EntityID: "ent_1"})
+			}},
+		{name: "deferred-rollforward", body: `{"data":{"tenant_id":"t_1","period_start":"2026-08-01T00:00:00Z","period_end":"2026-09-01T00:00:00Z","opening":10000,"added":5000,"released":4000,"closing":11000,"reporting_currency":"USD"}}`,
+			method: http.MethodGet, path: "/ledger/deferred-rollforward", query: "month=8&year=2026",
+			fn: func(c *Client) (any, error) { return c.Ledger.DeferredRollforward(context.Background(), 8, 2026) },
+			check: func(t *testing.T, got any) {
+				rf := got.(*DeferredRollforward)
+				if rf.Opening != 10000 || rf.Closing != 11000 || rf.Opening+rf.Added-rf.Released != rf.Closing {
+					t.Errorf("rollforward = %+v", rf)
+				}
+			}},
+	})
+}
+
+func TestLedgerExport(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, "date,account,debit,credit\n2026-08-01,1200,2900,0\n")
+	csv, err := ts.client.Ledger.Export(context.Background(), &LedgerExportParams{Month: 8, Year: 2026, EntityID: "ent_1"})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if ts.method != http.MethodGet || ts.path != "/ledger/export" || ts.query != "entity_id=ent_1&month=8&year=2026" || ts.accept != "text/csv" {
+		t.Errorf("request = %s %s?%s accept=%s", ts.method, ts.path, ts.query, ts.accept)
+	}
+	if !strings.HasPrefix(string(csv), "date,account") {
+		t.Errorf("csv = %q", csv)
+	}
+}
+
+func TestMeteringChargesAndSimulation(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"charge_id":"chg_1","plan_id":"plan_1","plan_name":"Pro","plan_code":"PRO","plan_active":true,"charge_model":"per_unit","pay_in_advance":false}]}`)
+	charges, err := ts.client.BillableMetrics.Charges(context.Background(), "bm_1")
+	if err != nil {
+		t.Fatalf("Charges: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/billable-metrics/bm_1/charges")
+	if len(charges) != 1 || charges[0].PlanCode != "PRO" || charges[0].ChargeModel != "per_unit" {
+		t.Errorf("charges = %+v", charges)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"data":{"plan_id":"plan_1","currency":"USD","charges":[{"metric_id":"bm_1","metric_code":"api_calls","charge_model":"per_unit","quantity":1000,"amount":3500}],"subtotal":3500,"gl_preview":[{"account_code":1200,"account_name":"AR","debit":3500,"credit":0},{"account_code":4000,"account_name":"Revenue","debit":0,"credit":3500}],"balanced":true,"note":"read-only"}}`)
+	sim, err := ts.client.Plans.SimulateCharges(context.Background(), "plan_1", &SimulateChargesParams{
+		Currency: "USD",
+		Charges:  []ChargeParams{{MetricID: "bm_1", ChargeModel: "per_unit", Amounts: map[string]ChargeAmounts{"USD": {UnitAmount: "0.0035"}}, FilterKey: "region", Filters: []ChargeFilter{{Value: "eu", Amounts: map[string]ChargeAmounts{"USD": {UnitAmount: "0.004"}}}}}},
+		Usage:    []SimulateUsage{{MetricID: "bm_1", Quantity: 1000}},
+	})
+	if err != nil {
+		t.Fatalf("SimulateCharges: %v", err)
+	}
+	ts.assertRequest(http.MethodPost, "/plans/plan_1/simulate-charges")
+	body := ts.bodyMap()
+	if body["currency"] != "USD" || len(body["charges"].([]any)) != 1 || len(body["usage"].([]any)) != 1 {
+		t.Errorf("body = %v", body)
+	}
+	if chg := body["charges"].([]any)[0].(map[string]any); chg["filter_key"] != "region" || len(chg["filters"].([]any)) != 1 {
+		t.Errorf("charge body = %v", chg)
+	}
+	if sim.Subtotal != 3500 || !sim.Balanced || len(sim.Charges) != 1 || sim.Charges[0].Amount != 3500 || len(sim.GLPreview) != 2 || sim.GLPreview[1].Credit != 3500 {
+		t.Errorf("simulation = %+v", sim)
+	}
+}
+
+func TestPaymentAttempts(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":[{"id":"pa_1","invoice_id":"inv_1","invoice_number":"INV-1","currency":"USD","gateway":"stripe","method":"card","status":"failed","failure_code":"card_declined","amount":2900,"settled_at":null}],"pagination":{"page":2,"per_page":25,"total":51,"total_pages":3}}`)
+	page, err := ts.client.PaymentAttempts.List(context.Background(), &PaymentAttemptListParams{Status: "failed", Page: 2, PerPage: 25})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/payment-attempts")
+	if ts.query != "page=2&per_page=25&status=failed" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if len(page.Data) != 1 || page.Data[0].FailureCode != "card_declined" || page.Pagination.TotalPages != 3 || page.Pagination.Total != 51 {
+		t.Errorf("page = %+v", page)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"data":[]}`)
+	if _, err := ts.client.PaymentAttempts.List(context.Background(), &PaymentAttemptListParams{Q: "INV-1"}); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if ts.query != "q=INV-1" {
+		t.Errorf("query = %q", ts.query)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"data":{"id":"pa_1","invoice_id":"inv_1","invoice_number":"INV-1","customer_id":"cus_1","subscription_id":"sub_1","gateway":"stripe","status":"succeeded","amount":2900,"settled_at":"2026-08-02T10:00:00Z"}}`)
+	pa, err := ts.client.PaymentAttempts.Get(context.Background(), "pa_1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/payment-attempts/pa_1")
+	if pa.CustomerID != "cus_1" || pa.SubscriptionID == nil || *pa.SubscriptionID != "sub_1" || pa.SettledAt == nil || pa.Status != "succeeded" {
+		t.Errorf("attempt = %+v", pa)
+	}
+}
+
+func TestFinance(t *testing.T) {
+	recon := `{"data":{"tenant_id":"t_1","invoices_checked":120,"paid_invoices_checked":80,"total_discrepancies":1,"discrepancies":[{"type":"missing_ar_posting","invoice_id":"inv_7","expected_amount":2900,"found_amount":0}],"truncated":false,"tb_compared":true,"reporting_currency":"USD"}}`
+	checkRecon := func(t *testing.T, got any) {
+		r := got.(*ReconciliationReport)
+		if r.InvoicesChecked != 120 || r.TotalDiscrepancies != 1 || len(r.Discrepancies) != 1 || *r.Discrepancies[0].InvoiceID != "inv_7" || r.Discrepancies[0].ExpectedAmount != 2900 || !r.TBCompared {
+			t.Errorf("report = %+v", r)
+		}
+	}
+	runCalls(t, []apiCall{
+		{name: "reconcile", body: recon, method: http.MethodGet, path: "/finance/reconciliation",
+			fn: func(c *Client) (any, error) { return c.Finance.Reconcile(context.Background()) }, check: checkRecon},
+		{name: "record-reconciliation", body: recon, method: http.MethodPost, path: "/finance/reconciliation/runs",
+			fn: func(c *Client) (any, error) { return c.Finance.RecordReconciliation(context.Background()) }, check: checkRecon},
+		{name: "runs", body: `{"data":[{"id":"run_1","run_by":null,"run_at":"2026-08-31T00:00:00Z","invoices_checked":120,"total_discrepancies":0,"tb_compared":true,"tb_accounts_checked":9,"tb_transfers_checked":300}]}`,
+			method: http.MethodGet, path: "/finance/reconciliation/runs", query: "limit=10",
+			fn: func(c *Client) (any, error) { return c.Finance.ReconciliationRuns(context.Background(), 10) },
+			check: func(t *testing.T, got any) {
+				runs := got.([]ReconciliationRun)
+				if len(runs) != 1 || runs[0].ID != "run_1" || runs[0].RunBy != nil || runs[0].TBTransfersChecked != 300 {
+					t.Errorf("runs = %+v", runs)
+				}
+			}},
+		{name: "run", body: `{"data":{"id":"run_1","run_by":"user_1","invoices_checked":120,"total_discrepancies":1,"discrepancies_truncated":false,"discrepancies":[{"type":"abnormal_account_balance","account_code":2100,"expected_amount":0,"found_amount":-50}]}}`,
+			method: http.MethodGet, path: "/finance/reconciliation/runs/run_1",
+			fn: func(c *Client) (any, error) { return c.Finance.ReconciliationRun(context.Background(), "run_1") },
+			check: func(t *testing.T, got any) {
+				run := got.(*ReconciliationRun)
+				if run.RunBy == nil || *run.RunBy != "user_1" || len(run.Discrepancies) != 1 || run.Discrepancies[0].AccountCode != 2100 || run.Discrepancies[0].FoundAmount != -50 {
+					t.Errorf("run = %+v", run)
+				}
+			}},
+		{name: "close-pack", body: `{"data":{"tenant_id":"t_1","period":{"month":8,"year":2026,"start":"2026-08-01T00:00:00Z","end":"2026-09-01T00:00:00Z"},"ready_to_close":false,"blockers":["1 reconciliation discrepancy"],"trial_balance":{"balanced":true,"total_debits":5000,"total_credits":5000},"reconciliation":{"total_discrepancies":1},"deferred_revenue":{"rollforward":{"opening":10000,"added":5000,"released":4000,"closing":11000},"recognition":{"month":8,"year":2026,"recognized_amount":4000,"deferred_balance":11000},"awaiting_payment":0,"unexplained_delta":0,"ties":true},"general_ledger":{"format":"csv","export_url":"/v1/ledger/export?month=8&year=2026"},"reporting_currency":"USD"}}`,
+			method: http.MethodGet, path: "/finance/close-pack", query: "month=8&year=2026",
+			fn: func(c *Client) (any, error) { return c.Finance.ClosePack(context.Background(), 8, 2026) },
+			check: func(t *testing.T, got any) {
+				p := got.(*ClosePack)
+				if p.ReadyToClose || len(p.Blockers) != 1 || p.Period.Month != 8 || p.TrialBalance == nil || !p.TrialBalance.Balanced ||
+					p.Reconciliation == nil || p.Reconciliation.TotalDiscrepancies != 1 || p.Deferred.Rollforward.Closing != 11000 ||
+					p.Deferred.Recognition == nil || p.Deferred.Recognition.RecognizedAmount != 4000 || !p.Deferred.Ties || p.GeneralLedger.Format != "csv" {
+					t.Errorf("close pack = %+v", p)
+				}
+			}},
+		{name: "revrec-report", body: `{"data":{"month":8,"year":2026,"recognized_amount":4000,"deferred_balance":11000,"upcoming":[{"month":9,"year":2026,"amount":6000},{"month":10,"year":2026,"amount":5000}],"by_currency":[{"currency":"USD","deferred":11000}]}}`,
+			method: http.MethodGet, path: "/finance/revrec/report", query: "month=8&year=2026",
+			fn: func(c *Client) (any, error) { return c.Finance.RevRecReport(context.Background(), 8, 2026) },
+			check: func(t *testing.T, got any) {
+				r := got.(*RevRecReport)
+				if r.RecognizedAmount != 4000 || len(r.Upcoming) != 2 || r.Upcoming[1].Amount != 5000 || r.ByCurrency[0].Deferred != 11000 {
+					t.Errorf("report = %+v", r)
+				}
+			}},
+		{name: "revrec-waterfall", body: `{"data":{"tenant_id":"t_1","buckets":[{"year":2026,"month":8,"recognized":4000,"scheduled":0},{"year":2026,"month":9,"recognized":0,"scheduled":6000}],"total_recognized":4000,"total_scheduled":6000,"reporting_currency":"USD"}}`,
+			method: http.MethodGet, path: "/finance/revrec/waterfall",
+			fn: func(c *Client) (any, error) { return c.Finance.RevRecWaterfall(context.Background()) },
+			check: func(t *testing.T, got any) {
+				w := got.(*RevenueWaterfall)
+				if len(w.Buckets) != 2 || w.Buckets[1].Scheduled != 6000 || w.TotalRecognized != 4000 {
+					t.Errorf("waterfall = %+v", w)
+				}
+			}},
+	})
+}
+
+func TestSettings(t *testing.T) {
+	bg := context.Background()
+	runCalls(t, []apiCall{
+		{name: "gst", body: `{"data":{"gstin":"27AAPFU0939F1ZV","state_code":"27","state_name":"Maharashtra","sac_code":"998314","gst_rate":18,"pan":"AAPFU0939F","legal_name":"Recurso Pvt Ltd","has_lut":true}}`,
+			method: http.MethodGet, path: "/settings/gst",
+			fn: func(c *Client) (any, error) { return c.Settings.GST(bg) },
+			check: func(t *testing.T, got any) {
+				g := got.(*GSTConfig)
+				if g.GSTIN != "27AAPFU0939F1ZV" || g.GSTRate != 18 || !g.HasLUT {
+					t.Errorf("gst = %+v", g)
+				}
+			}},
+		{name: "update-gst", body: `{"data":{"gstin":"27AAPFU0939F1ZV","gst_rate":18},"message":"GST configuration updated"}`,
+			method: http.MethodPut, path: "/settings/gst",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.UpdateGST(bg, &GSTConfig{GSTIN: "27AAPFU0939F1ZV", GSTRate: 18})
+			},
+			check: func(t *testing.T, got any) {
+				if got.(*GSTConfig).GSTIN != "27AAPFU0939F1ZV" {
+					t.Errorf("gst = %+v", got)
+				}
+			}},
+		{name: "validate-gstin", body: `{"valid":true,"state_code":"27","state_name":"Maharashtra","pan":"AAPFU0939F","message":"valid"}`,
+			method: http.MethodPost, path: "/settings/gst/validate",
+			fn: func(c *Client) (any, error) { return c.Settings.ValidateGSTIN(bg, "27AAPFU0939F1ZV") },
+			check: func(t *testing.T, got any) {
+				v := got.(*GSTINValidation)
+				if !v.Valid || v.StateCode != "27" || v.PAN != "AAPFU0939F" {
+					t.Errorf("validation = %+v", v)
+				}
+			}},
+		{name: "tax-registrations", body: `{"data":[{"state_code":"CA","registration_number":"123","status":"registered","registered_at":"2026-01-01"},{"state_code":"NY","status":"pending","registered_at":null}]}`,
+			method: http.MethodGet, path: "/settings/tax/registrations",
+			fn: func(c *Client) (any, error) { return c.Settings.TaxRegistrations(bg) },
+			check: func(t *testing.T, got any) {
+				rs := got.([]TaxRegistration)
+				if len(rs) != 2 || rs[0].Status != "registered" || *rs[0].RegisteredAt != "2026-01-01" || rs[1].RegisteredAt != nil {
+					t.Errorf("registrations = %+v", rs)
+				}
+			}},
+		{name: "set-tax-registrations", body: `{"data":[{"state_code":"CA","status":"registered"}]}`,
+			method: http.MethodPut, path: "/settings/tax/registrations",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.SetTaxRegistrations(bg, &TaxRegistrationsParams{Registrations: []TaxRegistration{{StateCode: "CA", Status: "registered"}}})
+			},
+			check: func(t *testing.T, got any) {
+				if rs := got.([]TaxRegistration); len(rs) != 1 || rs[0].StateCode != "CA" {
+					t.Errorf("registrations = %+v", rs)
+				}
+			}},
+		{name: "tax-nexus", body: `{"data":[{"state_code":"CA","nexus_type":"physical","established_at":"2025-06-01T00:00:00Z","created_at":"2025-06-01T00:00:00Z"}]}`,
+			method: http.MethodGet, path: "/settings/tax/nexus", query: "entity_id=ent_1",
+			fn: func(c *Client) (any, error) { return c.Settings.TaxNexus(bg, "ent_1") },
+			check: func(t *testing.T, got any) {
+				ns := got.([]TaxNexusState)
+				if len(ns) != 1 || ns[0].NexusType != "physical" || ns[0].EstablishedAt == nil {
+					t.Errorf("nexus = %+v", ns)
+				}
+			}},
+		{name: "set-tax-nexus", body: `{"data":[{"state_code":"TX","nexus_type":"economic"}]}`,
+			method: http.MethodPut, path: "/settings/tax/nexus",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.SetTaxNexus(bg, "", &TaxNexusParams{States: []TaxNexusState{{StateCode: "TX", NexusType: "economic"}}})
+			},
+			check: func(t *testing.T, got any) {
+				if ns := got.([]TaxNexusState); len(ns) != 1 || ns[0].StateCode != "TX" {
+					t.Errorf("nexus = %+v", ns)
+				}
+			}},
+		{name: "tax-liability", body: `{"data":{"from_date":"2026-01-01","to_date":"2026-12-31","currency":"USD","total_gross_sales":500000,"total_tax_collected":40000,"states":[{"state_code":"CA","gross_sales":300000,"taxable_sales":250000,"exempt_sales":50000,"tax_collected":25000,"invoice_count":30,"has_nexus":true,"nexus_type":"physical"}]}}`,
+			method: http.MethodGet, path: "/settings/tax/liability", query: "year=2026",
+			fn: func(c *Client) (any, error) { return c.Settings.TaxLiability(bg, &TaxLiabilityParams{Year: 2026}) },
+			check: func(t *testing.T, got any) {
+				r := got.(*TaxLiabilityReport)
+				if r.TotalTaxCollected != 40000 || len(r.States) != 1 || r.States[0].TaxCollected != 25000 || !r.States[0].HasNexus {
+					t.Errorf("liability = %+v", r)
+				}
+			}},
+		{name: "tax-liability-range", body: `{"data":{}}`, method: http.MethodGet, path: "/settings/tax/liability", query: "from=2026-01-01&to=2026-03-31",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.TaxLiability(bg, &TaxLiabilityParams{From: "2026-01-01", To: "2026-03-31"})
+			}},
+		{name: "tax-nexus-status", body: `{"data":{"year":2026,"dataset_certified":false,"states":[{"state_code":"TX","taxable_sales":450000,"txn_count":120,"threshold":{"state_code":"TX","sales_threshold":500000,"txn_threshold":0,"combinator":"or","measurement_period":"calendar_year","certified":false},"proximity_pct":90,"crossed":false}]}}`,
+			method: http.MethodGet, path: "/settings/tax/nexus/status", query: "year=2026",
+			fn: func(c *Client) (any, error) { return c.Settings.TaxNexusStatus(bg, 2026) },
+			check: func(t *testing.T, got any) {
+				r := got.(*NexusStatusReport)
+				if r.Year != 2026 || len(r.States) != 1 || r.States[0].ProximityPct != 90 || r.States[0].Threshold.SalesThreshold != 500000 || r.States[0].Crossed {
+					t.Errorf("nexus status = %+v", r)
+				}
+			}},
+		{name: "irp", body: `{"data":{"environment":"sandbox","client_id":"cid","username":"u","gstin":"27AAPFU0939F1ZV","is_enabled":true}}`,
+			method: http.MethodGet, path: "/settings/irp",
+			fn: func(c *Client) (any, error) { return c.Settings.IRP(bg) },
+			check: func(t *testing.T, got any) {
+				if cfg := got.(*IRPConfig); cfg.Environment != "sandbox" || !cfg.IsEnabled {
+					t.Errorf("irp = %+v", cfg)
+				}
+			}},
+		{name: "update-irp", body: `{"data":{"environment":"production","is_enabled":true},"message":"saved"}`,
+			method: http.MethodPut, path: "/settings/irp",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.UpdateIRP(bg, &IRPConfig{Environment: "production", ClientID: "cid", ClientSecret: "sec", IsEnabled: true})
+			},
+			check: func(t *testing.T, got any) {
+				if got.(*IRPConfig).Environment != "production" {
+					t.Errorf("irp = %+v", got)
+				}
+			}},
+		{name: "test-irp", body: `{"success":true,"message":"authenticated"}`, method: http.MethodPost, path: "/settings/irp/test",
+			fn: func(c *Client) (any, error) { return c.Settings.TestIRP(bg) },
+			check: func(t *testing.T, got any) {
+				if r := got.(*IRPTestResult); !r.Success || r.Message != "authenticated" {
+					t.Errorf("irp test = %+v", r)
+				}
+			}},
+		{name: "eu-einvoice", body: `{"data":{"enabled":true,"legal_name":"Recurso GmbH","vat_number":"DE123","country_code":"DE","city":"Berlin"}}`,
+			method: http.MethodGet, path: "/settings/eu-einvoice",
+			fn: func(c *Client) (any, error) { return c.Settings.EUEInvoice(bg) },
+			check: func(t *testing.T, got any) {
+				if cfg := got.(*EUEInvoiceConfig); !cfg.Enabled || cfg.VATNumber != "DE123" {
+					t.Errorf("eu config = %+v", cfg)
+				}
+			}},
+		{name: "update-eu-einvoice", body: `{"data":{"enabled":true,"country_code":"DE"}}`, method: http.MethodPut, path: "/settings/eu-einvoice",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.UpdateEUEInvoice(bg, &EUEInvoiceConfig{Enabled: true, CountryCode: "DE"})
+			},
+			check: func(t *testing.T, got any) {
+				if got.(*EUEInvoiceConfig).CountryCode != "DE" {
+					t.Errorf("eu config = %+v", got)
+				}
+			}},
+		{name: "us-tax", body: `{"data":{"legal_name":"Recurso Inc","ein":"12-3456789","address":"1 Main St"}}`, method: http.MethodGet, path: "/settings/tax/us",
+			fn: func(c *Client) (any, error) { return c.Settings.USTax(bg) },
+			check: func(t *testing.T, got any) {
+				if got.(*USTaxConfig).EIN != "12-3456789" {
+					t.Errorf("us tax = %+v", got)
+				}
+			}},
+		{name: "update-us-tax", body: `{"data":{"legal_name":"Recurso Inc","ein":"12-3456789"}}`, method: http.MethodPut, path: "/settings/tax/us",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.UpdateUSTax(bg, &USTaxConfig{LegalName: "Recurso Inc", EIN: "12-3456789"})
+			},
+			check: func(t *testing.T, got any) {
+				if got.(*USTaxConfig).LegalName != "Recurso Inc" {
+					t.Errorf("us tax = %+v", got)
+				}
+			}},
+		{name: "invoice-branding", body: `{"data":{"company_name":"Recurso","signatory_name":"Jane","terms":"Net 30"}}`, method: http.MethodGet, path: "/settings/invoice-branding",
+			fn: func(c *Client) (any, error) { return c.Settings.InvoiceBranding(bg) },
+			check: func(t *testing.T, got any) {
+				if b := got.(*InvoiceBranding); b.CompanyName != "Recurso" || b.Terms != "Net 30" {
+					t.Errorf("branding = %+v", b)
+				}
+			}},
+		{name: "update-invoice-branding", body: `{"data":{"company_name":"Recurso","terms":"Net 15"}}`, method: http.MethodPut, path: "/settings/invoice-branding",
+			fn: func(c *Client) (any, error) {
+				return c.Settings.UpdateInvoiceBranding(bg, &InvoiceBranding{CompanyName: "Recurso", Terms: "Net 15"})
+			},
+			check: func(t *testing.T, got any) {
+				if got.(*InvoiceBranding).Terms != "Net 15" {
+					t.Errorf("branding = %+v", got)
+				}
+			}},
+		{name: "mcp", body: `{"data":{"tier3_enabled":false}}`, method: http.MethodGet, path: "/settings/mcp",
+			fn: func(c *Client) (any, error) { return c.Settings.MCP(bg) },
+			check: func(t *testing.T, got any) {
+				if got.(*MCPSettings).Tier3Enabled {
+					t.Errorf("mcp = %+v", got)
+				}
+			}},
+		{name: "update-mcp", body: `{"data":{"tier3_enabled":true}}`, method: http.MethodPut, path: "/settings/mcp",
+			fn: func(c *Client) (any, error) { return c.Settings.UpdateMCP(bg, &MCPSettings{Tier3Enabled: true}) },
+			check: func(t *testing.T, got any) {
+				if !got.(*MCPSettings).Tier3Enabled {
+					t.Errorf("mcp = %+v", got)
+				}
+			}},
+	})
+}
+
+func TestSettingsUpdateBodies(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"tier3_enabled":true}}`)
+	if _, err := ts.client.Settings.UpdateMCP(context.Background(), &MCPSettings{Tier3Enabled: true}); err != nil {
+		t.Fatalf("UpdateMCP: %v", err)
+	}
+	if ts.ctype != "application/json" || ts.bodyMap()["tier3_enabled"] != true {
+		t.Errorf("body = %v ctype=%s", ts.bodyMap(), ts.ctype)
+	}
+	ts = newTestServer(t, http.StatusOK, `{"valid":false}`)
+	if _, err := ts.client.Settings.ValidateGSTIN(context.Background(), "bad"); err != nil {
+		t.Fatalf("ValidateGSTIN: %v", err)
+	}
+	if ts.bodyMap()["gstin"] != "bad" {
+		t.Errorf("body = %v", ts.bodyMap())
+	}
+}
+
+func TestImports(t *testing.T) {
+	bg := context.Background()
+	stripe := &StripeExport{Customers: []map[string]any{{"id": "cus_stripe_1", "email": "a@example.com"}}, Products: []map[string]any{}, Prices: []map[string]any{}, Subscriptions: []map[string]any{}}
+	rc := &RevenueCatExport{Subscribers: []map[string]any{{"app_user_id": "u1"}}, Products: []map[string]any{}}
+	cb := &ChargebeeExport{Customers: []map[string]any{{"id": "cb_1"}}, Plans: []map[string]any{}, Subscriptions: []map[string]any{}}
+	preview := `{"items":[{"kind":"customer","stripe_id":"cus_stripe_1","label":"a@example.com","action":"create","detail":""}],"summary":{"create":1},"warnings":["no payment methods"]}`
+	checkPreview := func(t *testing.T, got any) {
+		p := got.(*ImportPreview)
+		if len(p.Items) != 1 || p.Items[0].Action != "create" || p.Summary["create"] != 1 || len(p.Warnings) != 1 {
+			t.Errorf("preview = %+v", p)
+		}
+	}
+	commit := `{"plan":{"customers":1},"created":{"customers":1,"plans":0},"failures":[{"kind":"subscription","stripe_id":"sub_x","error":"unsupported interval"}]}`
+	checkCommit := func(t *testing.T, got any) {
+		r := got.(*ImportResult)
+		if r.Created["customers"] != 1 || len(r.Failures) != 1 || r.Failures[0].Error != "unsupported interval" || len(r.Plan) == 0 {
+			t.Errorf("result = %+v", r)
+		}
+	}
+	compare := `{"source":"stripe","customers":{"source":10,"matched":10,"missing":0},"plans":{"source":2,"matched":2,"missing":0},"subscriptions":{"source":8,"matched":7,"missing":1},"issues":[{"kind":"subscription","external_id":"sub_1","field":"status","source":"active","recurso":"missing"}],"ready":false,"generated_at":"2026-08-31T00:00:00Z"}`
+	checkCompare := func(t *testing.T, got any) {
+		r := got.(*CompareReport)
+		if r.Ready || r.Customers.Matched != 10 || r.Subscriptions.Missing != 1 || len(r.Issues) != 1 || r.Issues[0].Field != "status" {
+			t.Errorf("compare = %+v", r)
+		}
+	}
+	runCalls(t, []apiCall{
+		{name: "stripe-preview", body: preview, method: http.MethodPost, path: "/import/stripe/preview", fn: func(c *Client) (any, error) { return c.Imports.PreviewStripe(bg, stripe) }, check: checkPreview},
+		{name: "stripe-commit", body: commit, method: http.MethodPost, path: "/import/stripe/commit", fn: func(c *Client) (any, error) { return c.Imports.CommitStripe(bg, stripe) }, check: checkCommit},
+		{name: "stripe-compare", body: compare, method: http.MethodPost, path: "/import/stripe/compare", fn: func(c *Client) (any, error) { return c.Imports.CompareStripe(bg, stripe) }, check: checkCompare},
+		{name: "revenuecat-preview", body: preview, method: http.MethodPost, path: "/import/revenuecat/preview", fn: func(c *Client) (any, error) { return c.Imports.PreviewRevenueCat(bg, rc) }, check: checkPreview},
+		{name: "revenuecat-commit", body: commit, method: http.MethodPost, path: "/import/revenuecat/commit", fn: func(c *Client) (any, error) { return c.Imports.CommitRevenueCat(bg, rc) }, check: checkCommit},
+		{name: "revenuecat-compare", body: compare, method: http.MethodPost, path: "/import/revenuecat/compare", fn: func(c *Client) (any, error) { return c.Imports.CompareRevenueCat(bg, rc) }, check: checkCompare},
+		{name: "chargebee-preview", body: `{"items":[{"kind":"customer","chargebee_id":"cb_1","label":"cb_1","action":"link_existing"}],"summary":{"link_existing":1},"warnings":[]}`, method: http.MethodPost, path: "/import/chargebee/preview",
+			fn: func(c *Client) (any, error) { return c.Imports.PreviewChargebee(bg, cb) },
+			check: func(t *testing.T, got any) {
+				if p := got.(*ImportPreview); len(p.Items) != 1 || p.Items[0].ChargebeeID != "cb_1" || p.Items[0].Action != "link_existing" {
+					t.Errorf("preview = %+v", p)
+				}
+			}},
+		{name: "chargebee-commit", body: commit, method: http.MethodPost, path: "/import/chargebee/commit", fn: func(c *Client) (any, error) { return c.Imports.CommitChargebee(bg, cb) }, check: checkCommit},
+		{name: "chargebee-compare", body: compare, method: http.MethodPost, path: "/import/chargebee/compare", fn: func(c *Client) (any, error) { return c.Imports.CompareChargebee(bg, cb) }, check: checkCompare},
+		{name: "compare-reports", body: `{"data":[{"id":"rep_1","source":"stripe","ready":true,"generated_at":"2026-08-31T00:00:00Z"}]}`, method: http.MethodGet, path: "/import/compare-reports", query: "limit=5",
+			fn: func(c *Client) (any, error) { return c.Imports.CompareReports(bg, 5) },
+			check: func(t *testing.T, got any) {
+				if rs := got.([]StoredCompareReport); len(rs) != 1 || rs[0].ID != "rep_1" || !rs[0].Ready {
+					t.Errorf("reports = %+v", rs)
+				}
+			}},
+		{name: "compare-report", body: `{"data":{"id":"rep_1","source":"stripe","ready":true,"report":{"source":"stripe","ready":true},"generated_at":"2026-08-31T00:00:00Z"}}`, method: http.MethodGet, path: "/import/compare-reports/rep_1",
+			fn: func(c *Client) (any, error) { return c.Imports.CompareReport(bg, "rep_1") },
+			check: func(t *testing.T, got any) {
+				r := got.(*StoredCompareReport)
+				var full CompareReport
+				if err := json.Unmarshal(r.Report, &full); err != nil || r.ID != "rep_1" || !full.Ready || full.Source != "stripe" {
+					t.Errorf("report = %+v (%v)", r, err)
+				}
+			}},
+	})
+}
+
+func TestImportsRequestBody(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"items":[],"summary":{},"warnings":[]}`)
+	_, err := ts.client.Imports.PreviewStripe(context.Background(), &StripeExport{Customers: []map[string]any{{"id": "cus_1"}}, Products: []map[string]any{}, Prices: []map[string]any{}, Subscriptions: []map[string]any{}})
+	if err != nil {
+		t.Fatalf("PreviewStripe: %v", err)
+	}
+	body := ts.bodyMap()
+	if len(body["customers"].([]any)) != 1 || body["customers"].([]any)[0].(map[string]any)["id"] != "cus_1" {
+		t.Errorf("body = %v", body)
+	}
+	if _, ok := body["payment_methods"]; ok {
+		t.Errorf("empty payment_methods should be omitted: %v", body)
+	}
+}
+
+func TestImportsCompareReportDocument(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `<html>receipt</html>`)
+	doc, err := ts.client.Imports.CompareReportDocument(context.Background(), "rep_1")
+	if err != nil {
+		t.Fatalf("CompareReportDocument: %v", err)
+	}
+	if ts.method != http.MethodGet || ts.path != "/import/compare-reports/rep_1/document" || ts.accept != "text/html" || string(doc) != "<html>receipt</html>" {
+		t.Errorf("request = %s %s accept=%s doc=%q", ts.method, ts.path, ts.accept, doc)
+	}
+}
+
+func TestUsers(t *testing.T) {
+	bg := context.Background()
+	user := `{"data":{"id":"usr_1","email":"jane@example.com","name":"Jane","role":"%s"}}`
+	checkRole := func(role string) func(t *testing.T, got any) {
+		return func(t *testing.T, got any) {
+			if u := got.(*User); u.ID != "usr_1" || u.Role != role {
+				t.Errorf("user = %+v", u)
+			}
+		}
+	}
+	runCalls(t, []apiCall{
+		{name: "list", body: `{"data":[{"id":"usr_1","email":"jane@example.com","role":"owner"},{"id":"usr_2","email":"bob@example.com","role":"member"}]}`, method: http.MethodGet, path: "/users",
+			fn: func(c *Client) (any, error) { return c.Users.List(bg) },
+			check: func(t *testing.T, got any) {
+				if us := got.([]User); len(us) != 2 || us[1].Role != "member" {
+					t.Errorf("users = %+v", us)
+				}
+			}},
+		{name: "create", status: http.StatusCreated, body: fmt.Sprintf(user, "admin"), method: http.MethodPost, path: "/users",
+			fn: func(c *Client) (any, error) {
+				return c.Users.Create(bg, &UserCreateParams{Email: "jane@example.com", Name: "Jane", Role: "admin", Password: "hunter22"})
+			}, check: checkRole("admin")},
+		{name: "invite", status: http.StatusCreated, body: fmt.Sprintf(user, "member"), method: http.MethodPost, path: "/users/invite",
+			fn: func(c *Client) (any, error) {
+				return c.Users.Invite(bg, &UserInviteParams{Email: "jane@example.com", Role: "member"})
+			}, check: checkRole("member")},
+		{name: "update-role", body: fmt.Sprintf(user, "admin"), method: http.MethodPatch, path: "/users/usr_1",
+			fn: func(c *Client) (any, error) { return c.Users.UpdateRole(bg, "usr_1", "admin") }, check: checkRole("admin")},
+		{name: "delete", body: `{"status":"deleted"}`, method: http.MethodDelete, path: "/users/usr_1",
+			fn: func(c *Client) (any, error) { return c.Users.Delete(bg, "usr_1") },
+			check: func(t *testing.T, got any) {
+				if got.(*StatusResponse).Status != "deleted" {
+					t.Errorf("status = %+v", got)
+				}
+			}},
+	})
+}
+
+func TestUsersUpdateRoleBody(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"id":"usr_1","role":"admin"}}`)
+	if _, err := ts.client.Users.UpdateRole(context.Background(), "usr_1", "admin"); err != nil {
+		t.Fatalf("UpdateRole: %v", err)
+	}
+	if ts.bodyMap()["role"] != "admin" {
+		t.Errorf("body = %v", ts.bodyMap())
+	}
+}
+
+func TestGatewayConnections(t *testing.T) {
+	bg := context.Background()
+	runCalls(t, []apiCall{
+		{name: "list", body: `{"data":{"connections":[{"id":"gc_1","provider":"stripe","mode":"live","public_key":"pk_live_x","has_webhook_secret":true,"webhook_path":"/webhooks/stripe/gc_1"}],"vault_ready":true}}`, method: http.MethodGet, path: "/gateway-connections",
+			fn: func(c *Client) (any, error) { return c.GatewayConnections.List(bg) },
+			check: func(t *testing.T, got any) {
+				l := got.(*GatewayConnectionList)
+				if !l.VaultReady || len(l.Connections) != 1 || l.Connections[0].Provider != "stripe" || !l.Connections[0].HasWebhookSecret {
+					t.Errorf("list = %+v", l)
+				}
+			}},
+		{name: "create", status: http.StatusCreated, body: `{"data":{"id":"gc_2","provider":"razorpay","mode":"test","public_key":"rzp_test_x","has_webhook_secret":false}}`, method: http.MethodPost, path: "/gateway-connections",
+			fn: func(c *Client) (any, error) {
+				return c.GatewayConnections.Create(bg, &GatewayConnectionCreateParams{Provider: "razorpay", Mode: "test", PublicKey: "rzp_test_x", SecretKey: "s"})
+			},
+			check: func(t *testing.T, got any) {
+				if gc := got.(*GatewayConnection); gc.ID != "gc_2" || gc.Mode != "test" {
+					t.Errorf("connection = %+v", gc)
+				}
+			}},
+		{name: "delete", body: ``, method: http.MethodDelete, path: "/gateway-connections/razorpay",
+			fn: func(c *Client) (any, error) { return nil, c.GatewayConnections.Delete(bg, "razorpay") }},
+		{name: "set-webhook-secret", body: ``, method: http.MethodPut, path: "/gateway-connections/stripe/webhook-secret",
+			fn: func(c *Client) (any, error) {
+				return nil, c.GatewayConnections.SetWebhookSecret(bg, "stripe", "whsec_x")
+			}},
+	})
+}
+
+func TestGatewayConnectionsWebhookSecretBody(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, ``)
+	if err := ts.client.GatewayConnections.SetWebhookSecret(context.Background(), "stripe", "whsec_x"); err != nil {
+		t.Fatalf("SetWebhookSecret: %v", err)
+	}
+	if ts.bodyMap()["webhook_secret"] != "whsec_x" {
+		t.Errorf("body = %v", ts.bodyMap())
+	}
+}
+
+func TestIntegrationConnections(t *testing.T) {
+	bg := context.Background()
+	runCalls(t, []apiCall{
+		{name: "list", body: `{"data":{"connections":[{"id":"ic_1","category":"crm","provider":"hubspot","config":{"portal_id":"123"},"has_secrets":true}],"vault_ready":true}}`, method: http.MethodGet, path: "/integration-connections",
+			fn: func(c *Client) (any, error) { return c.IntegrationConnections.List(bg) },
+			check: func(t *testing.T, got any) {
+				l := got.(*IntegrationConnectionList)
+				if len(l.Connections) != 1 || l.Connections[0].Category != "crm" || l.Connections[0].Config["portal_id"] != "123" {
+					t.Errorf("list = %+v", l)
+				}
+			}},
+		{name: "create", status: http.StatusCreated, body: `{"data":{"id":"ic_2","category":"tax","provider":"avalara","config":{},"has_secrets":true}}`, method: http.MethodPost, path: "/integration-connections",
+			fn: func(c *Client) (any, error) {
+				return c.IntegrationConnections.Create(bg, &IntegrationConnectionCreateParams{Category: "tax", Provider: "avalara", Config: map[string]string{"api_key": "k"}})
+			},
+			check: func(t *testing.T, got any) {
+				if ic := got.(*IntegrationConnection); ic.ID != "ic_2" || ic.Provider != "avalara" {
+					t.Errorf("connection = %+v", ic)
+				}
+			}},
+		{name: "delete", body: ``, method: http.MethodDelete, path: "/integration-connections/tax/avalara",
+			fn: func(c *Client) (any, error) { return nil, c.IntegrationConnections.Delete(bg, "tax", "avalara") }},
+		{name: "sync-crm", body: `{"data":{"contacts_synced":40,"contacts_remaining":0}}`, method: http.MethodPost, path: "/crm/sync",
+			fn: func(c *Client) (any, error) { return c.IntegrationConnections.SyncCRM(bg) },
+			check: func(t *testing.T, got any) {
+				if r := got.(*CRMSyncResult); r.ContactsSynced != 40 {
+					t.Errorf("sync = %+v", r)
+				}
+			}},
+	})
+}
+
+func TestIndiaGSTReturns(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"data":{"tenant_id":"t_1","month":8,"year":2026,"b2b":[{"gstin":"29AAAAA0000A1Z5","invoices":[{"invoice_number":"INV-1","date":"2026-08-05T00:00:00Z","place_of_supply":"29","taxable_value":100000,"igst":18000,"cgst":0,"sgst":0,"rate":18}]}],"b2cs":[],"cdnr":[],"hsn_summary":[{"hsn_code":"998314","taxable_value":100000,"igst":18000,"invoice_count":1}],"total_taxable_value":100000,"total_igst":18000,"invoice_count":1},"gov_schema":{"gstin":"27AAPFU0939F1ZV","fp":"082026"}}`)
+	r1, err := ts.client.India.GSTR1(context.Background(), &GSTReturnParams{Month: 8, Year: 2026, EntityID: "ent_1"})
+	if err != nil {
+		t.Fatalf("GSTR1: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/india/gstr1")
+	if ts.query != "entity_id=ent_1&month=8&year=2026" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if r1.Data.TotalIGST != 18000 || len(r1.Data.B2B) != 1 || r1.Data.B2B[0].Invoices[0].Rate != 18 || r1.Data.HSNSummary[0].HSNCode != "998314" {
+		t.Errorf("gstr1 = %+v", r1.Data)
+	}
+	var gov map[string]any
+	if err := json.Unmarshal(r1.GovSchema, &gov); err != nil || gov["fp"] != "082026" {
+		t.Errorf("gov_schema = %s (%v)", r1.GovSchema, err)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"data":{"month":8,"year":2026,"outward_taxable":{"taxable_value":100000,"igst":18000,"cgst":0,"sgst":0},"zero_rated":{},"nil_exempt":{},"inward_reverse_charge":{},"non_gst":{},"inter_state_unregistered":[{"place_of_supply":"07","taxable_value":5000,"igst":900}],"invoice_count":1,"credit_note_count":0},"gov_schema":{}}`)
+	r3, err := ts.client.India.GSTR3B(context.Background(), &GSTReturnParams{Month: 8, Year: 2026})
+	if err != nil {
+		t.Fatalf("GSTR3B: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/india/gstr3b")
+	if ts.query != "month=8&year=2026" {
+		t.Errorf("query = %q", ts.query)
+	}
+	if r3.Data.OutwardTaxable.IGST != 18000 || len(r3.Data.InterStateUnregistered) != 1 || r3.Data.InterStateUnregistered[0].IGST != 900 {
+		t.Errorf("gstr3b = %+v", r3.Data)
+	}
+}
+
+func TestAuthMFAAndSessions(t *testing.T) {
+	bg := context.Background()
+	runCalls(t, []apiCall{
+		{name: "mfa-setup", body: `{"secret":"JBSWY3DPEHPK3PXP","otpauth_url":"otpauth://totp/Recurso:jane?secret=JBSWY3DPEHPK3PXP"}`, method: http.MethodPost, path: "/auth/mfa/setup",
+			fn: func(c *Client) (any, error) { return c.Auth.MFASetup(bg) },
+			check: func(t *testing.T, got any) {
+				if s := got.(*MFASetup); s.Secret != "JBSWY3DPEHPK3PXP" || !strings.HasPrefix(s.OTPAuthURL, "otpauth://") {
+					t.Errorf("setup = %+v", s)
+				}
+			}},
+		{name: "mfa-verify", body: `{"mfa_enabled":true,"backup_codes":["aaaa-bbbb","cccc-dddd"]}`, method: http.MethodPost, path: "/auth/mfa/verify",
+			fn: func(c *Client) (any, error) { return c.Auth.MFAVerify(bg, "123456") },
+			check: func(t *testing.T, got any) {
+				if s := got.(*MFAStatus); !s.MFAEnabled || len(s.BackupCodes) != 2 {
+					t.Errorf("status = %+v", s)
+				}
+			}},
+		{name: "mfa-disable", body: `{"mfa_enabled":false}`, method: http.MethodPost, path: "/auth/mfa/disable",
+			fn: func(c *Client) (any, error) { return c.Auth.MFADisable(bg, "123456") },
+			check: func(t *testing.T, got any) {
+				if got.(*MFAStatus).MFAEnabled {
+					t.Errorf("status = %+v", got)
+				}
+			}},
+		{name: "sessions", body: `{"data":[{"id":"ses_1","user_agent":"Mozilla/5.0","created_at":"2026-08-01T00:00:00Z","expires_at":"2026-09-01T00:00:00Z","current":true}]}`, method: http.MethodGet, path: "/auth/sessions",
+			fn: func(c *Client) (any, error) { return c.Auth.Sessions(bg) },
+			check: func(t *testing.T, got any) {
+				if ss := got.([]Session); len(ss) != 1 || !ss[0].Current || ss[0].UserAgent != "Mozilla/5.0" {
+					t.Errorf("sessions = %+v", ss)
+				}
+			}},
+		{name: "revoke-other-sessions", body: `{"message":"2 sessions revoked"}`, method: http.MethodDelete, path: "/auth/sessions",
+			fn: func(c *Client) (any, error) { return c.Auth.RevokeOtherSessions(bg) },
+			check: func(t *testing.T, got any) {
+				if got.(*MessageResponse).Message != "2 sessions revoked" {
+					t.Errorf("message = %+v", got)
+				}
+			}},
+		{name: "revoke-session", body: `{"message":"session revoked"}`, method: http.MethodDelete, path: "/auth/sessions/ses_2",
+			fn: func(c *Client) (any, error) { return c.Auth.RevokeSession(bg, "ses_2") },
+			check: func(t *testing.T, got any) {
+				if got.(*MessageResponse).Message != "session revoked" {
+					t.Errorf("message = %+v", got)
+				}
+			}},
+	})
+}
+
+func TestAuthMFAVerifyBody(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"mfa_enabled":true}`)
+	if _, err := ts.client.Auth.MFAVerify(context.Background(), "654321"); err != nil {
+		t.Fatalf("MFAVerify: %v", err)
+	}
+	if ts.bodyMap()["code"] != "654321" {
+		t.Errorf("body = %v", ts.bodyMap())
+	}
+}
+
+func TestSSOConnection(t *testing.T) {
+	bg := context.Background()
+	conn := `{"data":{"tenant_id":"t_1","idp_entity_id":"https://idp.example.com","idp_sso_url":"https://idp.example.com/sso","enabled":%s,"configured":true,"sp_metadata_url":"https://api.recurso.dev/auth/saml/t_1/metadata","sp_acs_url":"https://api.recurso.dev/auth/saml/t_1/acs"}}`
+	runCalls(t, []apiCall{
+		{name: "get", body: fmt.Sprintf(conn, "true"), method: http.MethodGet, path: "/sso/connection",
+			fn: func(c *Client) (any, error) { return c.SSO.Get(bg) },
+			check: func(t *testing.T, got any) {
+				if s := got.(*SSOConnection); !s.Enabled || !s.Configured || s.IdPEntityID != "https://idp.example.com" || s.SPACSURL == "" {
+					t.Errorf("sso = %+v", s)
+				}
+			}},
+		{name: "upsert", body: fmt.Sprintf(conn, "false"), method: http.MethodPut, path: "/sso/connection",
+			fn: func(c *Client) (any, error) {
+				return c.SSO.Upsert(bg, &SSOConnectionParams{IdPMetadataXML: "<EntityDescriptor/>", Enabled: false})
+			},
+			check: func(t *testing.T, got any) {
+				if s := got.(*SSOConnection); s.Enabled || !s.Configured {
+					t.Errorf("sso = %+v", s)
+				}
+			}},
+		{name: "delete", body: `{"message":"SSO connection deleted"}`, method: http.MethodDelete, path: "/sso/connection",
+			fn: func(c *Client) (any, error) { return c.SSO.Delete(bg) },
+			check: func(t *testing.T, got any) {
+				if got.(*MessageResponse).Message != "SSO connection deleted" {
+					t.Errorf("message = %+v", got)
+				}
+			}},
+	})
+}
+
+func TestBilling(t *testing.T) {
+	ts := newTestServer(t, http.StatusOK, `{"billing_status":"trialing","plan_tier":"starter","trial_ends_at":"2026-09-15T00:00:00Z","trial_days_left":12,"trial_expired":false}`)
+	st, err := ts.client.Billing.Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/billing/status")
+	if st.BillingStatus != "trialing" || st.TrialDaysLeft != 12 || st.TrialExpired {
+		t.Errorf("status = %+v", st)
+	}
+
+	ts = newTestServer(t, http.StatusOK, `{"plans":[{"tier":"starter","name":"Starter","price":"$49","period":"month","features":["Unlimited customers"],"cta":"Start trial","recommended":false},{"tier":"growth","name":"Growth","price":"$199","period":"month","recommended":true}]}`)
+	plans, err := ts.client.Billing.Plans(context.Background())
+	if err != nil {
+		t.Fatalf("Plans: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/billing/plans")
+	if len(plans) != 2 || plans[1].Tier != "growth" || !plans[1].Recommended || len(plans[0].Features) != 1 {
+		t.Errorf("plans = %+v", plans)
+	}
+}
+
+func TestSystemVersion(t *testing.T) {
+	// The base URL carries /v1; /version lives beside it at the root.
+	ts := newTestServer(t, http.StatusOK, `{"version":"1.42.0","gateway_mode":"live"}`)
+	ts.client = NewClient("test_key", WithBaseURL(ts.server.URL+"/v1"))
+	v, err := ts.client.System.Version(context.Background())
+	if err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+	ts.assertRequest(http.MethodGet, "/version")
+	if v.Version != "1.42.0" || v.GatewayMode != "live" {
+		t.Errorf("version = %+v", v)
+	}
+	// Other resources still go under /v1.
+	ts2 := newTestServer(t, http.StatusOK, `{"data":[]}`)
+	ts2.client = NewClient("test_key", WithBaseURL(ts2.server.URL+"/v1"))
+	if _, err := ts2.client.Plans.List(context.Background(), nil); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ts2.assertRequest(http.MethodGet, "/v1/plans")
 }

@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -54,5 +55,10 @@ func (s *DisputesService) Resolve(ctx context.Context, id string, params *Disput
 	var out struct {
 		Status string `json:"status"`
 	}
-	return s.client.do(ctx, http.MethodPost, "/disputes/"+id+"/resolve", params, &out)
+	return s.client.do(ctx, http.MethodPost, fmt.Sprintf("/disputes/%s/resolve", id), params, &out)
+}
+
+// Get retrieves one invoice dispute by ID.
+func (s *DisputesService) Get(ctx context.Context, id string) (*InvoiceDispute, error) {
+	return getData[*InvoiceDispute](ctx, s.client, http.MethodGet, fmt.Sprintf("/disputes/%s", id), nil)
 }

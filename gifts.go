@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -75,7 +76,7 @@ type GiftCancelResult struct {
 // Cancel cancels a purchased, unredeemed gift. The buyer is made whole
 // automatically; redeemed or already-canceled gifts return a conflict error.
 func (s *GiftsService) Cancel(ctx context.Context, id string) (*GiftCancelResult, error) {
-	out, err := getData[GiftCancelResult](ctx, s.client, http.MethodPost, "/gifts/"+id+"/cancel", nil)
+	out, err := getData[GiftCancelResult](ctx, s.client, http.MethodPost, fmt.Sprintf("/gifts/%s/cancel", id), nil)
 	if err != nil {
 		return nil, err
 	}

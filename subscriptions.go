@@ -205,13 +205,13 @@ func (s *SubscriptionsService) List(ctx context.Context, params *SubscriptionLis
 
 // Get returns one subscription by id, scoped to the authenticated tenant.
 func (s *SubscriptionsService) Get(ctx context.Context, id string) (*Subscription, error) {
-	return getData[*Subscription](ctx, s.client, http.MethodGet, "/subscriptions/"+id, nil)
+	return getData[*Subscription](ctx, s.client, http.MethodGet, fmt.Sprintf("/subscriptions/%s", id), nil)
 }
 
 // Update changes the subscription's plan.
 func (s *SubscriptionsService) Update(ctx context.Context, id string, params *SubscriptionUpdateParams) (*Subscription, error) {
 	var out Subscription
-	if err := s.client.do(ctx, http.MethodPut, "/subscriptions/"+id, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/subscriptions/%s", id), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -313,4 +313,104 @@ func (s *SubscriptionsService) ListAddons(ctx context.Context, id string) ([]Sub
 // RemoveAddon detaches an add-on from a subscription.
 func (s *SubscriptionsService) RemoveAddon(ctx context.Context, id, addonID string) error {
 	return s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/subscriptions/%s/addons/%s", id, addonID), nil, nil)
+}
+
+// SubscriptionFinancialSummary is a subscription's recurring economics and
+// per-currency outstanding position (minor units).
+type SubscriptionFinancialSummary struct {
+	SubscriptionID        string               `json:"subscription_id"`
+	Status                string               `json:"status"`
+	Currency              string               `json:"currency"`
+	MRR                   int64                `json:"mrr"`
+	RecurringAmount       int64                `json:"recurring_amount"`
+	IntervalUnit          string               `json:"interval_unit"`
+	IntervalCount         int                  `json:"interval_count"`
+	CurrentPeriodStart    time.Time            `json:"current_period_start"`
+	CurrentPeriodEnd      time.Time            `json:"current_period_end"`
+	NextInvoiceDate       *time.Time           `json:"next_invoice_date"`
+	NextInvoiceBaseAmount int64                `json:"next_invoice_base_amount"`
+	CouponID              *string              `json:"coupon_id"`
+	DiscountActive        bool                 `json:"discount_active"`
+	Outstanding           []CurrencyFinancials `json:"outstanding"`
+}
+
+// CancelPreview is the read-only financial consequence of canceling a
+// subscription now or at period end (minor units). Nothing is changed.
+type CancelPreview struct {
+	SubscriptionID           string    `json:"subscription_id"`
+	Immediately              bool      `json:"immediately"`
+	EffectiveDate            time.Time `json:"effective_date"`
+	ResultingStatus          string    `json:"resulting_status"`
+	CancelAtPeriodEnd        bool      `json:"cancel_at_period_end"`
+	Currency                 string    `json:"currency"`
+	DeferredRevenueForfeited int64     `json:"deferred_revenue_forfeited"`
+	RecognizedAsBreakage     int64     `json:"recognized_as_breakage"`
+	AvoidedFutureRecurring   int64     `json:"avoided_future_recurring"`
+	FlatFeeRefund            int64     `json:"flat_fee_refund"`
+}
+
+// SubscriptionChange is one lifecycle event: a "status" or "plan" change.
+type SubscriptionChange struct {
+	ID             string    `json:"id"`
+	SubscriptionID string    `json:"subscription_id"`
+	ChangeType     string    `json:"change_type"`
+	FromValue      *string   `json:"from_value"`
+	ToValue        *string   `json:"to_value"`
+	ChangedAt      time.Time `json:"changed_at"`
+}
+
+// SubscriptionHistory is a subscription's lifecycle timeline.
+type SubscriptionHistory struct {
+	SubscriptionID string               `json:"subscription_id"`
+	History        []SubscriptionChange `json:"history"`
+}
+
+// CancellationReason is one preset reason customers can pick when
+// canceling.
+type CancellationReason struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	AllowsFeedback bool   `json:"allows_feedback"`
+}
+
+// FinancialSummary returns the subscription's MRR, next invoice, and
+// outstanding position.
+func (s *SubscriptionsService) FinancialSummary(ctx context.Context, id string) (*SubscriptionFinancialSummary, error) {
+	return getData[*SubscriptionFinancialSummary](ctx, s.client, http.MethodGet, fmt.Sprintf("/subscriptions/%s/financial-summary", id), nil)
+}
+
+// CancelPreview previews the financial consequence of canceling.
+// immediately selects an immediate cancellation instead of period end.
+func (s *SubscriptionsService) CancelPreview(ctx context.Context, id string, immediately bool) (*CancelPreview, error) {
+	path := newQuery().boolean("immediately", immediately).apply(fmt.Sprintf("/subscriptions/%s/cancel-preview", id))
+	return getData[*CancelPreview](ctx, s.client, http.MethodGet, path, nil)
+}
+
+// History returns the subscription's status and plan change timeline.
+func (s *SubscriptionsService) History(ctx context.Context, id string) (*SubscriptionHistory, error) {
+	return getData[*SubscriptionHistory](ctx, s.client, http.MethodGet, fmt.Sprintf("/subscriptions/%s/history", id), nil)
+}
+
+// BillUsage generates an interim invoice for usage accrued so far in the
+// current period (progressive billing).
+func (s *SubscriptionsService) BillUsage(ctx context.Context, id string) (*Invoice, error) {
+	var out Invoice
+	if err := s.client.do(ctx, http.MethodPost, fmt.Sprintf("/subscriptions/%s/bill-usage", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Consent returns the recurring-billing consent tied to the subscription.
+func (s *SubscriptionsService) Consent(ctx context.Context, id string) (*Consent, error) {
+	var out Consent
+	if err := s.client.do(ctx, http.MethodGet, fmt.Sprintf("/subscriptions/%s/consent", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CancellationReasons lists the preset cancellation reasons.
+func (s *SubscriptionsService) CancellationReasons(ctx context.Context) ([]CancellationReason, error) {
+	return getData[[]CancellationReason](ctx, s.client, http.MethodGet, "/cancellation-reasons", nil)
 }

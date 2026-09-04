@@ -83,7 +83,7 @@ func (s *WebhooksService) UpdateStatus(ctx context.Context, id string, params *W
 // Delete removes a webhook endpoint.
 func (s *WebhooksService) Delete(ctx context.Context, id string) (*MessageResponse, error) {
 	var out MessageResponse
-	if err := s.client.do(ctx, http.MethodDelete, "/webhooks/"+id, nil, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodDelete, fmt.Sprintf("/webhooks/%s", id), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

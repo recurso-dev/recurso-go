@@ -2,6 +2,7 @@ package recurso
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -79,7 +80,7 @@ func (s *PlansService) Create(ctx context.Context, params *PlanCreateParams) (*P
 
 // Get retrieves a plan by ID.
 func (s *PlansService) Get(ctx context.Context, id string) (*Plan, error) {
-	out, err := getData[Plan](ctx, s.client, http.MethodGet, "/plans/"+id, nil)
+	out, err := getData[Plan](ctx, s.client, http.MethodGet, fmt.Sprintf("/plans/%s", id), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +91,7 @@ func (s *PlansService) Get(ctx context.Context, id string) (*Plan, error) {
 // it.
 func (s *PlansService) Update(ctx context.Context, id string, params *PlanUpdateParams) (*Plan, error) {
 	var out Plan
-	if err := s.client.do(ctx, http.MethodPut, "/plans/"+id, params, &out); err != nil {
+	if err := s.client.do(ctx, http.MethodPut, fmt.Sprintf("/plans/%s", id), params, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
